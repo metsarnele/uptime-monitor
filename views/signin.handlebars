@@ -2,13 +2,15 @@
     <h2>Sign In</h2>
 
     {{#if registered}}
-    <div class="success-message">Account created successfully! Please sign in.</div>
+        <div class="success-message">Account created successfully! Please sign in.</div>
     {{/if}}
 
     <form id="signin-form" action="/api/signin" method="post">
-        {{#if error}}
-        <div class="error-message">{{error}}</div>
-        {{/if}}
+        <div id="error-container">
+            {{#if error}}
+                <div class="error-message">{{error}}</div>
+            {{/if}}
+        </div>
 
         <div class="form-group">
             <label for="email">Email Address</label>
@@ -27,26 +29,68 @@
 </div>
 
 <script>
-document.getElementById('signin-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
+    document.getElementById('signin-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
 
-    // Kuvame teate, et sisselogimine pole praegu saadaval
-    const message = document.createElement('div');
-    message.className = 'info-message';
-    message.textContent = 'Sisselogimine pole praegu saadaval.';
-    message.style.backgroundColor = '#e3f2fd';
-    message.style.color = '#0d47a1';
-    message.style.padding = '0.75rem';
-    message.style.borderRadius = '4px';
-    message.style.marginBottom = '1rem';
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
 
-    // Eemaldame varasema teate, kui see on olemas
-    const existingMessage = document.querySelector('.info-message');
-    if (existingMessage) {
-        existingMessage.remove();
-    }
+        try {
+            const response = await fetch('/api/signin', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({email, password})
+            });
 
-    document.querySelector('form').prepend(message);
-});
+            const data = await response.json();
+
+            if (data.success) {
+                // Store token in localStorage for future API requests
+                localStorage.setItem('authToken', data.token);
+                // Redirect to dashboard on successful login
+                window.location.href = '/dashboard';
+            } else {
+                // Show error message
+                const errorContainer = document.getElementById('error-container');
+                errorContainer.innerHTML = ''; // Clear existing errors
+
+                const errorMessage = document.createElement('div');
+                errorMessage.className = 'error-message';
+                errorMessage.textContent = data.message || 'Incorrect email or password';
+                errorMessage.setAttribute('data-testid', 'error-message');
+
+                errorContainer.appendChild(errorMessage);
+            }
+        } catch (error) {
+                console.error('Sign-in error:', error);
+
+                const errorContainer = document.getElementById('error-container');
+                errorContainer.innerHTML = '';
+
+                let errorMessageText = 'An error occurred during sign-in. Please try again.';
+
+                // Try to extract message from error object if available
+                if (error.response && typeof error.response.json === 'function') {
+                    try {
+                        const errData = await error.response.json();
+                        errorMessageText = errData?.message || errorMessageText;
+                    } catch {
+                        // Ignore JSON parse errors
+                    }
+                } else if (error.message) {
+                    errorMessageText = error.message;
+                }
+
+                // Create and display error message
+                const errorMessage = document.createElement('div');
+                errorMessage.className = 'error-message';
+                errorMessage.textContent = errorMessageText;
+                errorMessage.setAttribute('data-testid', 'error-message');
+
+                errorContainer.appendChild(errorMessage);
+            }
+    });
 </script>
 

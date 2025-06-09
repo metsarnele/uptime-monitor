@@ -6,17 +6,44 @@ import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { engine } from 'express-handlebars';
+import cookieParser from 'cookie-parser';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(cookieParser());
+
+// Auth middleware to check if user is logged in
+app.use((req, res, next) => {
+    const token = req.cookies.authToken;
+    res.locals.isAuthenticated = false;
+
+    if (token) {
+        try {
+            const verified = jwt.verify(token, 'secret_key');
+            req.user = verified;
+            res.locals.isAuthenticated = true;
+        } catch (error) {
+            // Invalid token, user not authenticated
+        }
+    }
+    next();
+});
+
+// Middleware to require authentication
+const requireAuth = (req, res, next) => {
+    if (!res.locals.isAuthenticated) {
+        return res.redirect('/signin');
+    }
+    next();
+};
 
 // Setup Handlebars
 app.engine('handlebars', engine());
@@ -26,8 +53,11 @@ app.set('views', path.join(__dirname, 'views'));
 // Initialize database
 let db;
 async function initDb() {
+    // Use TEST_DB environment variable if available, otherwise use default database
+    const dbFilename = process.env.TEST_DB || 'database.sqlite';
+
     db = await open({
-        filename: 'database.sqlite',
+        filename: dbFilename,
         driver: sqlite3.Database
     });
 
@@ -72,10 +102,13 @@ app.get('/signin', (req, res) => {
     res.render('signin', { registered });
 });
 
-app.get('/dashboard', (req, res) => {
-    // This would normally check for authentication
-    // For now, we'll just render a simple dashboard view
+app.get('/dashboard', requireAuth, (req, res) => {
     res.render('dashboard');
+});
+
+app.get('/signout', (req, res) => {
+    res.clearCookie('authToken');
+    res.redirect('/');
 });
 
 // Routes - API
@@ -114,14 +147,28 @@ app.post('/api/signin', async (req, res) => {
         const user = await db.get('SELECT * FROM users WHERE email = ?', [email]);
 
         if (!user || !await bcryptjs.compare(password, user.password)) {
-            return res.status(401).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Incorrect email or password' 
+            });
         }
 
-        const token = jwt.sign({ userId: user.id }, 'secret_key', { expiresIn: '24h' });
+        const token = jwt.sign({ userId: user.id, email: user.email }, 'secret_key', { expiresIn: '24h' });
 
-        res.json({ token, message: 'Sign in successful' });
+        res.cookie('authToken', token, { httpOnly: true });
+
+        res.json({
+            success: true, 
+            user: { id: user.id, email: user.email },
+            token,
+            message: 'Sign in successful'
+        });
     } catch (error) {
-        res.status(500).json({ error: 'Server error' });
+        console.error('Sign-in error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'An error occurred during sign-in'
+        });
     }
 });
 

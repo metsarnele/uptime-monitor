@@ -84,14 +84,14 @@ This makes it easier to debug issues and understand test behavior.
 
 ## User Stories
 
-Story 1: [ ] User Sign Up
+Story 1: [x] User Sign Up
 As a user, I want to sign up so that I can save my monitors.
 Acceptance Criteria:
 * I can enter my email and password in a sign-up form
 * After successful sign-up, I receive confirmation and can proceed to sign in page
 * My credentials are stored securely in the database
 
-Story 2: [ ] User Sign In
+Story 2: [x] User Sign In
 As a user, I want to sign in so that I can access my account.
 Acceptance Criteria:
 * I can enter my email and password to access my account
