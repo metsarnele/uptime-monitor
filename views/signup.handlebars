@@ -1,0 +1,58 @@
+<div class="auth-container">
+    <h2>Create an Account</h2>
+
+    <form id="signup-form" action="/api/signup" method="post">
+        {{#if error}}
+        <div class="error-message">{{error}}</div>
+        {{/if}}
+
+        <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required minlength="8">
+            <p class="form-hint">Password must be at least 8 characters long</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Sign Up</button>
+    </form>
+
+    <p class="auth-link">Already have an account? <a href="/signin">Sign In</a></p>
+</div>
+
+<script>
+document.getElementById('signup-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+
+    try {
+        const response = await fetch('/api/signup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            window.location.href = '/signin?registered=true';
+        } else {
+            const errorElement = document.querySelector('.error-message') || document.createElement('div');
+            errorElement.className = 'error-message';
+            errorElement.textContent = data.error;
+            if (!document.querySelector('.error-message')) {
+                document.querySelector('form').prepend(errorElement);
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+});
+</script>

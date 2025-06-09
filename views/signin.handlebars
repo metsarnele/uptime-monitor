@@ -1,0 +1,52 @@
+<div class="auth-container">
+    <h2>Sign In</h2>
+
+    {{#if registered}}
+    <div class="success-message">Account created successfully! Please sign in.</div>
+    {{/if}}
+
+    <form id="signin-form" action="/api/signin" method="post">
+        {{#if error}}
+        <div class="error-message">{{error}}</div>
+        {{/if}}
+
+        <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Sign In</button>
+    </form>
+
+    <p class="auth-link">Don't have an account? <a href="/signup">Sign Up</a></p>
+</div>
+
+<script>
+document.getElementById('signin-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    // Kuvame teate, et sisselogimine pole praegu saadaval
+    const message = document.createElement('div');
+    message.className = 'info-message';
+    message.textContent = 'Sisselogimine pole praegu saadaval.';
+    message.style.backgroundColor = '#e3f2fd';
+    message.style.color = '#0d47a1';
+    message.style.padding = '0.75rem';
+    message.style.borderRadius = '4px';
+    message.style.marginBottom = '1rem';
+
+    // Eemaldame varasema teate, kui see on olemas
+    const existingMessage = document.querySelector('.info-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+
+    document.querySelector('form').prepend(message);
+});
+</script>
+

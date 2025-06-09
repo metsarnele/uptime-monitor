@@ -1,0 +1,12 @@
+<h1>Welcome to Uptime Monitor</h1>
+<p>A simple tool to monitor your website's uptime.</p>
+
+<div class="card">
+    <h2>Monitor Your Sites</h2>
+    <p>Keep track of your website's availability and performance.</p>
+    {{#unless user}}
+        <p>Please <a href="/signin">sign in</a> or <a href="/signup">create an account</a> to get started.</p>
+    {{else}}
+        <p><a href="/dashboard" class="btn">Go to Dashboard</a></p>
+    {{/unless}}
+</div>

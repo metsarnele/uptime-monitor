@@ -1,0 +1,55 @@
+<div class="dashboard-container">
+    <h1>Dashboard</h1>
+
+    <div class="dashboard-header">
+        <p>Welcome back! Here you can monitor your websites.</p>
+        <button id="add-site-btn" class="btn">Add New Site</button>
+    </div>
+
+    <div id="sites-list" class="sites-list">
+        <div class="card site-card">
+            <div class="site-info">
+                <h3>Example Site</h3>
+                <p>https://example.com</p>
+            </div>
+            <div class="site-status">
+                <span class="status-badge status-up">Up</span>
+                <p>Last checked: Just now</p>
+            </div>
+        </div>
+
+        <div class="empty-state" style="display: none;">
+            <p>You don't have any sites to monitor yet.</p>
+            <button class="btn">Add your first site</button>
+        </div>
+    </div>
+</div>
+
+<div id="add-site-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <span class="close-modal">&times;</span>
+        <h2>Add New Site</h2>
+        <form id="add-site-form">
+            <div class="form-group">
+                <label for="site-name">Site Name</label>
+                <input type="text" id="site-name" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="site-url">URL</label>
+                <input type="url" id="site-url" name="url" required placeholder="https://example.com">
+            </div>
+            <div class="form-group">
+                <label for="check-interval">Check Interval</label>
+                <select id="check-interval" name="interval">
+                    <option value="5">Every 5 minutes</option>
+                    <option value="10">Every 10 minutes</option>
+                    <option value="30">Every 30 minutes</option>
+                    <option value="60">Every hour</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Site</button>
+        </form>
+    </div>
+</div>
+
+<script src="/js/dashboard.js"></script>
