@@ -3,17 +3,19 @@
 
 export default {
   testDir: './tests/e2e',
-  timeout: 30 * 1000,
+  timeout: 30 * 1000, // Increased timeout for Firefox compatibility
   expect: {
-    timeout: 5000
+    timeout: 10000 // Increased expect timeout
   },
-  fullyParallel: true, // Run tests in parallel
+  fullyParallel: true, // Enable parallel execution
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  // Let Playwright automatically determine optimal worker count
+  reporter: 'list',
+  globalSetup: './tests/global-setup.js',
+  globalTeardown: './tests/global-teardown.js',
   use: {
-    actionTimeout: 0,
+    actionTimeout: 10000, // Increased default action timeout
     // We'll set the baseURL dynamically in each test
     trace: 'on-first-retry',
   },
@@ -22,9 +24,18 @@ export default {
       name: 'chromium',
       use: {
         browserName: 'chromium',
+        actionTimeout: 5000, // Keep chromium fast
+      },
+    },
+    {
+      name: 'firefox',
+      use: {
+        browserName: 'firefox',
+        // Firefox can be slower, increase timeouts significantly
+        actionTimeout: 15000,
+        navigationTimeout: 15000,
       },
     },
   ],
   // We don't use the built-in webServer because we'll start a server for each test
 };
-

@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "bun i; bun --hot index.js",
     "start": "bun index.js",
-    "test": "playwright test"
+    "test": "playwright test --reporter=list",
+    "test:debug": "DEBUG_CLEANUP=true playwright test --reporter=list",
+    "test:quiet": "DEBUG_CLEANUP=false playwright test --reporter=list",
+    "test:cleanup": "node scripts/cleanup-tracked-resources.js",
+    "test:legacy": "node scripts/run-tests.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
