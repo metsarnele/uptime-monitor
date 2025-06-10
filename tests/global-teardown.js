@@ -1,22 +1,17 @@
 // Global teardown for Playwright tests
-import { broadCleanup } from '../scripts/cleanup-tracked-resources.js';
 
 async function globalTeardown() {
   console.log('🧽 Running global teardown...');
 
-  // Always run broad cleanup to ensure no processes are left behind
-  // The individual cleanup might not be working reliably
-  console.log('🧹 Running comprehensive cleanup to ensure no processes are left...');
-  broadCleanup();
-
-  // Also try tracked cleanup if available
+  // Verify that individual cleanup worked properly
   if (global.testResourceTracker) {
-    const hasRemainingServers = global.testResourceTracker.servers.size > 0;
-    const hasRemainingDatabases = global.testResourceTracker.databases.size > 0;
+    const remainingServers = global.testResourceTracker.servers.size;
+    const remainingDatabases = global.testResourceTracker.databases.size;
 
-    if (hasRemainingServers || hasRemainingDatabases) {
-      console.log(`⚠️  Tracker still has ${global.testResourceTracker.servers.size} servers and ${global.testResourceTracker.databases.size} databases`);
-      await global.testResourceTracker.cleanup();
+    if (remainingServers > 0 || remainingDatabases > 0) {
+      console.log(`⚠️  Warning: ${remainingServers} servers and ${remainingDatabases} databases still tracked (individual cleanup may have failed)`);
+    } else {
+      console.log('✅ All resources cleaned up successfully');
     }
   }
 

@@ -64,7 +64,7 @@ function getProcessInfo(pid) {
  */
 function broadCleanup() {
   const TEST_PORT_START = 3100;
-  const TEST_PORT_END = 3400;
+  const TEST_PORT_END = 3999; // Scalable to hundreds of workers
 
   console.log(`🧹 Running broad cleanup (ports ${TEST_PORT_START}-${TEST_PORT_END})...`);
 

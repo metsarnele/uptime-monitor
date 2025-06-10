@@ -6,9 +6,9 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { test as base } from '@playwright/test';
 
-// Test server port range (must match cleanup script)
+// Test server port range (must match cleanup script) - scalable to hundreds of workers
 const TEST_PORT_START = 3100;
-const TEST_PORT_END = 3400;
+const TEST_PORT_END = 3999; // 900 ports to support hundreds of workers
 
 // Generate unique test database name for each test run
 export const getTestDbPath = (workerIndex = 0, testTitle = '') => {
@@ -20,8 +20,7 @@ export const getTestDbPath = (workerIndex = 0, testTitle = '') => {
   return `test-database-w${workerIndex}-${processId}-${timestamp}-${randomStr}-${testSlug}.sqlite`;
 };
 
-// Counter for unique port assignment per worker
-const workerPortCounters = new Map();
+// Simple worker-based port allocation (each worker gets 1 port since tests run sequentially within workers)
 
 // Helper function to get process information
 function getProcessInfo(pid) {
@@ -51,6 +50,39 @@ function getProcessInfo(pid) {
   } catch (e) {
     return { name: 'unknown', command: 'unknown' };
   }
+}
+
+// Helper function to create worker-specific log prefix
+function getWorkerPrefix(workerIndex, testTitle = '') {
+  const colors = [
+    '\x1b[36m', // Cyan
+    '\x1b[33m', // Yellow
+    '\x1b[35m', // Magenta
+    '\x1b[32m', // Green
+    '\x1b[34m', // Blue
+    '\x1b[31m', // Red
+  ];
+  const reset = '\x1b[0m';
+  const color = colors[workerIndex % colors.length];
+  const shortTitle = testTitle.length > 20 ? testTitle.substring(0, 17) + '...' : testTitle;
+  return `${color}[W${workerIndex}${shortTitle ? `:${shortTitle}` : ''}]${reset}`;
+}
+
+// Debug output control
+const DEBUG_CLEANUP = process.env.DEBUG_CLEANUP === 'true' || process.env.DEBUG_CLEANUP === '1';
+
+// Helper function for worker-specific logging (debug only)
+function workerLog(workerIndex, testTitle, message) {
+  if (!DEBUG_CLEANUP) return; // Skip logging if debug is disabled
+
+  const prefix = getWorkerPrefix(workerIndex, testTitle);
+  console.log(`${prefix} ${message}`);
+}
+
+// Helper function for important messages (always shown)
+function workerInfo(workerIndex, testTitle, message) {
+  const prefix = getWorkerPrefix(workerIndex, testTitle);
+  console.log(`${prefix} ${message}`);
 }
 
 // Global resource tracker
@@ -108,24 +140,15 @@ global.testResourceTracker = global.testResourceTracker || {
   }
 };
 
-// Get a unique port for test server based on worker index
+// Get the port for a worker (scalable to hundreds of workers)
 export const getTestPort = (workerIndex = 0) => {
-  // Initialize counter for this worker if not exists
-  if (!workerPortCounters.has(workerIndex)) {
-    workerPortCounters.set(workerIndex, 0);
-  }
-
-  // Get and increment counter for this worker
-  const testIndex = workerPortCounters.get(workerIndex);
-  workerPortCounters.set(workerIndex, testIndex + 1);
-
-  // Use worker index and test index to ensure unique ports across parallel workers
-  // Each worker gets a range of 100 ports to avoid collisions within the defined range
-  const port = TEST_PORT_START + (workerIndex * 100) + testIndex;
+  // Each worker gets exactly one port: Worker 0 = 3100, Worker 1 = 3101, etc.
+  const port = TEST_PORT_START + workerIndex;
 
   // Ensure we don't exceed the port range
   if (port > TEST_PORT_END) {
-    throw new Error(`Port ${port} exceeds test port range (${TEST_PORT_START}-${TEST_PORT_END})`);
+    const maxWorkers = TEST_PORT_END - TEST_PORT_START + 1;
+    throw new Error(`Worker ${workerIndex} exceeds maximum supported workers (${maxWorkers}). Port ${port} exceeds range (${TEST_PORT_START}-${TEST_PORT_END})`);
   }
 
   return port;
@@ -150,8 +173,8 @@ export async function initTestDatabase(dbPath) {
 
 // Start a test server for a specific test
 export async function startTestServer(dbPath, port) {
-  // Start the server process with environment variables
-  const serverProcess = spawn('bun', ['run', 'dev'], {
+  // Start the server process WITHOUT --hot flag for tests (to avoid persistent processes)
+  const serverProcess = spawn('bun', ['index.js'], {
     env: {
       ...process.env,
       TEST_DB: dbPath,
@@ -230,40 +253,38 @@ export function waitForServer(url, maxRetries = 150, interval = 100) {
 }
 
 // Clean up test database and server with improved error handling
-export async function cleanupTest(dbPath, serverProcess) {
+export async function cleanupTest(dbPath, serverProcess, processInfo = null, workerIndex = 0, testTitle = '') {
   let processKilled = false;
 
   // Kill server process if it exists
   if (serverProcess && serverProcess.pid) {
     try {
-      // Get process info before attempting to kill
-      const processInfo = getProcessInfo(serverProcess.pid);
-      console.log(`🧹 Cleaning up server PID ${serverProcess.pid} (${processInfo.name}): ${processInfo.command}`);
+      // Use provided process info or get it fresh (fallback)
+      const info = processInfo || getProcessInfo(serverProcess.pid);
+      workerLog(workerIndex, testTitle, `🧹 Cleaning up server PID ${serverProcess.pid} (${info.name}): ${info.command}`);
 
       // First check if process is actually running
       try {
         process.kill(serverProcess.pid, 0); // Check if process exists
       } catch (e) {
-        console.log(`✓ Process ${serverProcess.pid} already dead`);
+        workerLog(workerIndex, testTitle, `✓ Process ${serverProcess.pid} already dead`);
         processKilled = true;
         return { processKilled, dbRemoved: false }; // Early return, skip database cleanup for now
       }
 
-      // Find and kill the parent bash process if it exists
+      // For bun processes, we need to be more aggressive
+      // Kill the entire process group to handle any child processes
+      workerLog(workerIndex, testTitle, `⚠ Force killing process ${serverProcess.pid} and its group...`);
+
       try {
         const { execSync } = require('child_process');
-        const parentPid = execSync(`ps -o ppid= -p ${serverProcess.pid}`, { encoding: 'utf8' }).trim();
-        if (parentPid && parentPid !== '1') {
-          console.log(`🧹 Also killing parent process ${parentPid}`);
-          process.kill(parseInt(parentPid), 'SIGKILL');
-        }
+        // Kill the entire process group
+        execSync(`pkill -P ${serverProcess.pid}`, { stdio: 'ignore' }); // Kill children first
+        process.kill(serverProcess.pid, 'SIGKILL'); // Then kill the main process
       } catch (e) {
-        // Parent process might not exist or already dead
+        // Fallback to regular kill
+        process.kill(serverProcess.pid, 'SIGKILL');
       }
-
-      // Skip graceful shutdown and go straight to force kill for test processes
-      console.log(`⚠ Force killing process ${serverProcess.pid}...`);
-      process.kill(serverProcess.pid, 'SIGKILL');
 
       // Wait for force kill to take effect
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -282,14 +303,14 @@ export async function cleanupTest(dbPath, serverProcess) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
         } catch (e) {
-          console.log(`✓ Successfully killed process ${serverProcess.pid}`);
+          workerLog(workerIndex, testTitle, `✓ Successfully killed process ${serverProcess.pid}`);
           processKilled = true;
           break;
         }
       }
 
       if (!processKilled) {
-        console.error(`❌ Failed to kill process ${serverProcess.pid} after ${5} attempts`);
+        workerLog(workerIndex, testTitle, `❌ Failed to kill process ${serverProcess.pid} after ${5} attempts`);
         // Try using system kill command as last resort
         try {
           const { execSync } = require('child_process');
@@ -299,17 +320,17 @@ export async function cleanupTest(dbPath, serverProcess) {
           // Final verification
           try {
             process.kill(serverProcess.pid, 0);
-            console.error(`❌ System kill also failed for process ${serverProcess.pid}`);
+            workerLog(workerIndex, testTitle, `❌ System kill also failed for process ${serverProcess.pid}`);
           } catch (e) {
-            console.log(`✓ System kill succeeded for process ${serverProcess.pid}`);
+            workerLog(workerIndex, testTitle, `✓ System kill succeeded for process ${serverProcess.pid}`);
             processKilled = true;
           }
         } catch (e) {
-          console.error(`❌ System kill command failed: ${e.message}`);
+          workerLog(workerIndex, testTitle, `❌ System kill command failed: ${e.message}`);
         }
       }
     } catch (error) {
-      console.error(`❌ Error killing test server ${serverProcess.pid}: ${error.message}`);
+      workerLog(workerIndex, testTitle, `❌ Error killing test server ${serverProcess.pid}: ${error.message}`);
     }
   } else {
     processKilled = true; // No process to kill
@@ -322,7 +343,7 @@ export async function cleanupTest(dbPath, serverProcess) {
     try {
       if (fs.existsSync(dbPath)) {
         fs.unlinkSync(dbPath);
-        console.log(`✓ Removed database: ${dbPath}`);
+        workerLog(workerIndex, testTitle, `✓ Removed database: ${dbPath}`);
         dbRemoved = true;
         break;
       } else {
@@ -332,7 +353,7 @@ export async function cleanupTest(dbPath, serverProcess) {
     } catch (error) {
       retries--;
       if (retries === 0) {
-        console.error(`❌ Error cleaning up test database after retries: ${error.message}`);
+        workerLog(workerIndex, testTitle, `❌ Error cleaning up test database after retries: ${error.message}`);
       } else {
         // Wait a bit before retrying
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -362,9 +383,23 @@ export const test = base.extend({
     // Start server for this test
     const server = await startTestServer(dbPath, port);
 
-    // Register server with tracker
+    // Get process info while the process is fresh and store it
+    let processInfo = { name: 'unknown', command: 'unknown' };
+    if (server.process.pid) {
+      try {
+        // Wait a moment for the process to fully start
+        await new Promise(resolve => setTimeout(resolve, 100));
+        processInfo = getProcessInfo(server.process.pid);
+        workerLog(workerIndex, testTitle, `📝 Captured process info for PID ${server.process.pid}: ${processInfo.name} - ${processInfo.command}`);
+      } catch (e) {
+        workerLog(workerIndex, testTitle, `⚠ Could not get process info for PID ${server.process.pid}: ${e.message}`);
+      }
+    }
+
+    // Register server with tracker including process info
     global.testResourceTracker.servers.set(port, {
       process: server.process,
+      processInfo,
       dbPath,
       workerIndex
     });
@@ -383,8 +418,12 @@ export const test = base.extend({
 
     // Clean up after the test - try multiple approaches
     try {
-      // First attempt: individual cleanup
-      const cleanupResult = await cleanupTest(dbPath, server.process);
+      // Get the stored process info from the tracker
+      const trackedServer = global.testResourceTracker.servers.get(port);
+      const processInfo = trackedServer ? trackedServer.processInfo : null;
+
+      // First attempt: individual cleanup with process info and worker context
+      const cleanupResult = await cleanupTest(dbPath, server.process, processInfo, workerIndex, testTitle);
 
       // Always remove from tracker regardless of cleanup result
       // The global teardown will handle any remaining processes
@@ -393,17 +432,17 @@ export const test = base.extend({
 
       // If individual cleanup failed, try immediate system kill
       if (!cleanupResult.processKilled && server.process && server.process.pid) {
-        console.log(`⚠ Individual cleanup failed, trying system kill for PID ${server.process.pid}`);
+        workerLog(workerIndex, testTitle, `⚠ Individual cleanup failed, trying system kill for PID ${server.process.pid}`);
         try {
           const { execSync } = require('child_process');
           execSync(`kill -9 ${server.process.pid}`, { stdio: 'ignore' });
-          console.log(`✓ System kill succeeded for PID ${server.process.pid}`);
+          workerLog(workerIndex, testTitle, `✓ System kill succeeded for PID ${server.process.pid}`);
         } catch (e) {
-          console.log(`⚠ System kill also failed for PID ${server.process.pid}`);
+          workerLog(workerIndex, testTitle, `⚠ System kill also failed for PID ${server.process.pid}`);
         }
       }
     } catch (error) {
-      console.error(`❌ Error during test cleanup: ${error.message}`);
+      workerLog(workerIndex, testTitle, `❌ Error during test cleanup: ${error.message}`);
       // Still remove from tracker to avoid duplicate cleanup attempts
       global.testResourceTracker.servers.delete(port);
       global.testResourceTracker.databases.delete(dbPath);
