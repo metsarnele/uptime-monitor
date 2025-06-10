@@ -1,37 +1,18 @@
 // @ts-check
-import { test, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './testSetup';
 import { open } from 'sqlite';
 import sqlite3 from 'sqlite3';
 import bcryptjs from 'bcryptjs';
-import { getTestDbPath, initTestDatabase, getTestPort, startTestServer, waitForServer, cleanupTest } from './testSetup';
-
-/**
- * @typedef {Object} TestServer
- * @property {string} url - The server URL
- * @property {Object} process - The server process
- */
 
 test.describe('Monitor Management', () => {
   // Test data for a pre-registered user
   const testEmail = 'monitor-test@example.com';
   const testPassword = 'securepassword123';
-  /** @type {string} */
-  let dbPath;
-  /** @type {TestServer} */
-  let server;
-  /** @type {string} */
-  let baseURL;
-  /** @type {number|undefined} */
+  /** @type {number} */
   let userId;
 
   // Helper function to check for text in page with retries
-  /**
-   * @param {import('@playwright/test').Page} page - The Playwright page object
-   * @param {string} text - The text to search for in the page content
-   * @param {number} maxRetries - Maximum number of retry attempts
-   * @param {number} retryInterval - Time in ms between retries
-   * @returns {Promise<boolean>} - Whether the text was found
-   */
   async function checkPageContentWithRetries(page, text, maxRetries = 3, retryInterval = 500) {
     let retries = 0;
     let found = false;
@@ -49,12 +30,13 @@ test.describe('Monitor Management', () => {
     return found;
   }
   
-  // Setup: Create a test database and start a server before each test
-  test.beforeEach(async ({ page, context }) => {
-    // Create unique test database and server for this test
-    dbPath = getTestDbPath();
-    const db = await initTestDatabase(dbPath);
-    const port = getTestPort();
+  // Setup: Create a test user before each test
+  test.beforeEach(async ({ page, testServer }) => {
+    // Create a test user in the database
+    const db = await open({
+      filename: testServer.dbPath,
+      driver: sqlite3.Database
+    });
 
     // Create test user
     const hashedPassword = await bcryptjs.hash(testPassword, 10);
@@ -78,15 +60,8 @@ test.describe('Monitor Management', () => {
 
     await db.close();
 
-    // Start server for this test
-    server = await startTestServer(dbPath, port);
-    baseURL = server.url;
-
-    // Wait for server to be ready
-    await waitForServer(baseURL);
-
     // Navigate to the home page and sign in
-    await page.goto(`${baseURL}/signin`);
+    await page.goto(`${testServer.url}/signin`);
     await page.getByLabel('Email Address').fill(testEmail);
     await page.getByLabel('Password').fill(testPassword);
     await page.getByRole('button', { name: /sign in/i }).click();
@@ -99,23 +74,9 @@ test.describe('Monitor Management', () => {
     await page.waitForSelector('#add-monitor-form');
   });
 
-  // Clean up after each test
-  test.afterEach(async () => {
-    try {
-      await cleanupTest(dbPath, server.process);
-      // Add a small delay to ensure server process is fully closed
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } catch (error) {
-      console.error('Error during test cleanup:', error);
-    }
-  });
-
-  test('should validate URL format', async ({ page }) => {
+  test('should validate URL format', async ({ page, testServer }) => {
     // Try to add an invalid URL
     const invalidUrl = 'not-a-valid-url';
-    
-    // Wait for the form to be fully loaded
-    await page.waitForTimeout(500);
     
     // Find the URL input field and submit button
     const urlInput = page.locator('#monitor-url');
@@ -138,13 +99,10 @@ test.describe('Monitor Management', () => {
   });
 
   
-  test('should allow adding a valid URL monitor', async ({ page }) => {
+  test('should allow adding a valid URL monitor', async ({ page, testServer }) => {
     // Test adding a valid URL monitor
     const validUrl = 'https://example.com';
     const monitorName = 'Example Site';
-    
-    // Wait for the form to be fully loaded
-    await page.waitForTimeout(500);
     
     // Find the URL input field, name field, and submit button
     const urlInput = page.locator('#monitor-url');
@@ -157,7 +115,7 @@ test.describe('Monitor Management', () => {
       await nameInput.fill(monitorName);
     }
     
-    // Try to submit with waiting for response - but handle case where response doesn't match pattern
+    // Try to submit with waiting for response
     try {
       await Promise.all([
         page.waitForResponse(response => response.url().includes('/api/monitors'), { timeout: 5000 }),
@@ -165,59 +123,41 @@ test.describe('Monitor Management', () => {
       ]);
     } catch (error) {
       // If we can't catch the response, just click the button
-      console.log('Could not wait for API response, continuing with test');
       await addButton.click();
     }
     
-    // Wait a moment for the UI to update
-    await page.waitForTimeout(1000);
+    // Wait for the network to be idle and page to stabilize
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
+      // If network doesn't become idle, continue anyway
+      console.log('Network did not become idle, continuing test');
+    });
     
-    // Check for the URL in the list or for a success message
-    const monitorsList = page.locator('#sites-list');
+    // Wait for the sites list to be visible
+    await page.waitForSelector('#sites-list', { timeout: 5000 });
     
-    // Check if URL appears in the page content
-    const pageContent = await page.content();
-    const urlInPage = pageContent.includes(validUrl);
+    // Check if the URL appears in the UI
+    await expect(page.getByText(validUrl)).toBeVisible({ timeout: 5000 });
     
-    // If URL is in page, the test passes this step
-    expect(urlInPage).toBeTruthy();
+    // Check database
+    const db = await open({
+      filename: testServer.dbPath,
+      driver: sqlite3.Database
+    });
     
-    // Check database - but don't fail the test if database check fails
-    try {
-      const db = await open({
-        filename: dbPath,
-        driver: sqlite3.Database
-      });
-      
-      // Check if monitor was added to database (might take time)
-      let attempts = 3;
-      let monitor = null;
-      
-      while (attempts > 0 && !monitor) {
-        monitor = await db.get('SELECT * FROM monitors WHERE url = ? AND user_id = ?', [validUrl, userId]);
-        if (!monitor) {
-          await page.waitForTimeout(500); // Wait before retry
-          attempts--;
-        }
-      }
-      
-      // We check if monitor exists, but don't fail the test if it doesn't
-      // This allows the test to pass if the UI shows success but DB write is delayed
-      if (monitor) {
-        expect(monitor.url).toBe(validUrl);
-        if (await nameInput.isVisible() && monitor.name) {
-          expect(monitor.name).toBe(monitorName);
-        }
-      }
-      
-      await db.close();
-    } catch (error) {
-      console.log(`Database check failed: ${error.message}`);
-      // Continue test even if database check fails
+    // Check if monitor was added to database
+    const monitor = await db.get('SELECT * FROM monitors WHERE url = ? AND user_id = ?', [validUrl, userId]);
+    
+    // Verify the monitor exists and has correct data
+    expect(monitor).toBeTruthy();
+    expect(monitor.url).toBe(validUrl);
+    if (await nameInput.isVisible() && monitor.name) {
+      expect(monitor.name).toBe(monitorName);
     }
+    
+    await db.close();
   });
 
-  test('should display dashboard with monitor after adding', async ({ page }) => {
+  test('should display dashboard with monitor after adding', async ({ page, testServer }) => {
     // First add a valid monitor
     const validUrl = 'https://test-dashboard.com';
     const monitorName = 'Dashboard Test Site';
@@ -233,24 +173,13 @@ test.describe('Monitor Management', () => {
     }
     
     // Submit the form and wait for response
-    try {
-      await Promise.all([
-        page.waitForResponse(response => response.url().includes('/api/monitors')),
-        addButton.click()
-      ]);
-    } catch (error) {
-      console.log('Error waiting for response:', error.message);
+    await Promise.all([
+      page.waitForResponse(response => response.url().includes('/api/monitors')),
+      addButton.click()
+    ]).catch(async () => {
+      // If waiting for response fails, still click the button
       await addButton.click();
-    }
-    
-    // Wait for the page to refresh or update with the new data (more resilient approach)
-    try {
-      await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 5000 });
-    } catch (error) {
-      console.log('Navigation timeout or error:', error.message);
-      // Continue anyway, we'll check for the content
-      await page.waitForTimeout(1000);
-    }
+    });
     
     // Make sure we're still on the dashboard
     await expect(page).toHaveURL(/.*\/dashboard/);
@@ -258,7 +187,7 @@ test.describe('Monitor Management', () => {
     // Verify the dashboard has loaded
     await page.waitForSelector('h1:has-text("Dashboard")');
     
-    // Verify the sites-list element exists (it always does, even if empty)
+    // Verify the sites-list element exists
     const monitorsList = page.locator('#sites-list');
     await expect(monitorsList).toBeVisible();
     
@@ -272,18 +201,12 @@ test.describe('Monitor Management', () => {
       await expect(nameItem).toBeVisible();
     }
     
-    // Check for status indicators or other monitor details if they exist
-    const statusIndicator = page.locator('.status-indicator').first();
-    if (await statusIndicator.isVisible()) {
-      await expect(statusIndicator).toBeVisible();
-    }
-    
     // Verify the dashboard has proper navigation elements
     await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Sign Out' })).toBeVisible();
   });
 
-  test('should not allow adding duplicate URLs for the same user', async ({ page }) => {
+  test('should not allow adding duplicate URLs for the same user', async ({ page, testServer }) => {
     // First add a valid monitor
     const validUrl = 'https://duplicate-test.com';
     
@@ -293,101 +216,41 @@ test.describe('Monitor Management', () => {
     
     // Add the first monitor
     await urlInput.fill(validUrl);
-    try {
-      await Promise.all([
-        page.waitForResponse(response => response.url().includes('/api/monitors'), { timeout: 10000 }),
-        addButton.click()
-      ]);
-    } catch (error) {
-      console.log('Error waiting for first response:', error.message);
-      await addButton.click();
-    }
-    
-    // Wait for the dashboard to update
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      page.waitForResponse(response => response.url().includes('/api/monitors'))
+        .catch(() => {}), // Ignore timeout
+      addButton.click()
+    ]);
     
     // Now try to add the same URL again
     await urlInput.fill(validUrl);
+    await addButton.click();
     
-    // Wait for the response when we try to add a duplicate, with error handling
-    try {
-      // Increase timeout to 15 seconds to give more time for the response
-      await Promise.all([
-        page.waitForResponse(
-          response => response.url().includes('/api/monitors'), 
-          { timeout: 15000 }
-        ),
-        addButton.click()
-      ]);
-    } catch (error) {
-      console.log('Error waiting for duplicate response:', error.message);
-      // If we can't catch the response, just click the button and continue
-      await addButton.click();
-      await page.waitForTimeout(2000); // Wait longer after clicking
-    }
-    
-    // Check for error message - it could be shown in various UI elements
-    await page.waitForTimeout(1000); // Give the UI time to update
-    
-    // Look for error messages in notification elements or text on page
-    const errorMessage = page.locator('.notification.error, .alert-danger, .error-message');
-    
-    // Check for common error text patterns
+    // Check for error message
     const errorTexts = ['already exists', 'duplicate', 'already monitoring'];
     
-    // Try several times to find error message with increasing wait time
-    let errorFound = false;
-    for (let attempt = 0; attempt < 3 && !errorFound; attempt++) {
-      // Check page content
-      const pageContent = await page.content();
-      for (const errorText of errorTexts) {
-        if (pageContent.includes(errorText)) {
-          errorFound = true;
-          break;
-        }
-      }
-      
-      // Check for visible error elements
-      if (!errorFound && await errorMessage.isVisible().catch(() => false)) {
-        errorFound = true;
-      }
-      
-      // If error not found, wait a bit longer and try again
-      if (!errorFound && attempt < 2) {
-        await page.waitForTimeout(1000 * (attempt + 1));
-      }
+    // Check page content for error messages
+    const pageContent = await page.content();
+    let errorFound = errorTexts.some(text => pageContent.includes(text));
+    
+    // Also check for error elements
+    if (!errorFound) {
+      const errorMessage = page.locator('.notification.error, .alert-danger, .error-message');
+      errorFound = await errorMessage.isVisible().catch(() => false);
     }
     
-    // Expect to find error indication
+    // Expect to find an error indication
     expect(errorFound).toBeTruthy();
     
-    // Verify there's still only one instance of the monitor in the list
-    const monitorItems = await page.getByText(validUrl).all();
-    
-    // There might be one in the form and one in the list, or just one in the list
-    // if the form was cleared. Either way, there shouldn't be multiple entries in the list.
-    expect(monitorItems.length).toBeLessThanOrEqual(2);
-    
-    // Verify database only has one entry for this URL
+    // Verify there's still only one instance of the monitor in the database
     const db = await open({
-      filename: dbPath,
+      filename: testServer.dbPath,
       driver: sqlite3.Database
     });
     
-    try {
-      // Check if the first monitor was successfully added
-      const monitors = await db.all('SELECT * FROM monitors WHERE url = ? AND user_id = ?', [validUrl, userId]);
-      
-      // Instead of expecting exactly 1 monitor, we just need to verify the duplicate wasn't added
-      // This makes the test more resilient if the add operation fails for some reason
-      expect(monitors.length).toBeLessThanOrEqual(1);
-      
-      // If we found a monitor, verify it's the correct one
-      if (monitors.length === 1) {
-        expect(monitors[0].url).toBe(validUrl);
-      }
-    } finally {
-      await db.close();
-    }
+    const monitors = await db.all('SELECT * FROM monitors WHERE url = ? AND user_id = ?', [validUrl, userId]);
+    expect(monitors.length).toBeLessThanOrEqual(1);
+    
+    await db.close();
   });
 });

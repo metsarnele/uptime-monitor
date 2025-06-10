@@ -96,7 +96,7 @@ Acceptance Criteria:
 * If the credentials are correct, I am redirected to my dashboard
 * If the credentials are incorrect, I see an appropriate error message
 
-Story 3: [ ] Add Monitor
+Story 3: [x] Add Monitor
 As a user, I want to add a monitor so that I can track its availability.
 Acceptance Criteria:
 * I can enter a URL in a form to add a monitor
