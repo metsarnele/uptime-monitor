@@ -4,10 +4,11 @@
   "module": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "bun run --hot index.js",
+    "dev": "bun i; bun --hot index.js",
     "start": "bun index.js",
-    "build": "bun build ./client/src/index.jsx --outdir ./client/dist && cp ./client/public/index.html ./client/dist/index.html",
-    "test": "playwright test"
+    "test": "playwright test --reporter=list",
+    "test:cleanup": "node scripts/cleanup-tracked-resources.js",
+    "test:legacy": "node scripts/run-tests.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

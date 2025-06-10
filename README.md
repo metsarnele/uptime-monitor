@@ -20,8 +20,6 @@ Uptime Monitor is a web application that allows users to monitor the availabilit
 ### Running the Application
 
 ```bash
-# Build the frontend
-bun run build
 
 # Start the server
 bun run dev
