@@ -7,7 +7,7 @@ export default {
   expect: {
     timeout: 10000 // Increased expect timeout
   },
-  fullyParallel: true, // Enable parallel execution
+  fullyParallel: false, // Enable parallel execution
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   // Let Playwright automatically determine optimal worker count
