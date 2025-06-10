@@ -231,45 +231,116 @@ export function waitForServer(url, maxRetries = 150, interval = 100) {
 
 // Clean up test database and server with improved error handling
 export async function cleanupTest(dbPath, serverProcess) {
+  let processKilled = false;
+
   // Kill server process if it exists
   if (serverProcess && serverProcess.pid) {
     try {
-      // Try graceful shutdown first
-      process.kill(serverProcess.pid, 'SIGTERM');
+      // Get process info before attempting to kill
+      const processInfo = getProcessInfo(serverProcess.pid);
+      console.log(`🧹 Cleaning up server PID ${serverProcess.pid} (${processInfo.name}): ${processInfo.command}`);
 
-      // Wait a bit for graceful shutdown
+      // First check if process is actually running
+      try {
+        process.kill(serverProcess.pid, 0); // Check if process exists
+      } catch (e) {
+        console.log(`✓ Process ${serverProcess.pid} already dead`);
+        processKilled = true;
+        return { processKilled, dbRemoved: false }; // Early return, skip database cleanup for now
+      }
+
+      // Find and kill the parent bash process if it exists
+      try {
+        const { execSync } = require('child_process');
+        const parentPid = execSync(`ps -o ppid= -p ${serverProcess.pid}`, { encoding: 'utf8' }).trim();
+        if (parentPid && parentPid !== '1') {
+          console.log(`🧹 Also killing parent process ${parentPid}`);
+          process.kill(parseInt(parentPid), 'SIGKILL');
+        }
+      } catch (e) {
+        // Parent process might not exist or already dead
+      }
+
+      // Skip graceful shutdown and go straight to force kill for test processes
+      console.log(`⚠ Force killing process ${serverProcess.pid}...`);
+      process.kill(serverProcess.pid, 'SIGKILL');
+
+      // Wait for force kill to take effect
       await new Promise(resolve => setTimeout(resolve, 200));
 
-      // Force kill if still running
-      try {
-        process.kill(serverProcess.pid, 0); // Check if process still exists
-        process.kill(serverProcess.pid, 'SIGKILL'); // Force kill if it does
-      } catch (e) {
-        // Process already dead, which is what we want
+      // Verify the process is actually dead with multiple attempts
+      let killAttempts = 5;
+      while (killAttempts > 0) {
+        try {
+          process.kill(serverProcess.pid, 0); // Check if process still exists
+          killAttempts--;
+          console.log(`⚠ Process ${serverProcess.pid} still alive, attempt ${6 - killAttempts}/5`);
+
+          if (killAttempts > 0) {
+            // Try killing again
+            process.kill(serverProcess.pid, 'SIGKILL');
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+        } catch (e) {
+          console.log(`✓ Successfully killed process ${serverProcess.pid}`);
+          processKilled = true;
+          break;
+        }
+      }
+
+      if (!processKilled) {
+        console.error(`❌ Failed to kill process ${serverProcess.pid} after ${5} attempts`);
+        // Try using system kill command as last resort
+        try {
+          const { execSync } = require('child_process');
+          execSync(`kill -9 ${serverProcess.pid}`, { stdio: 'ignore' });
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          // Final verification
+          try {
+            process.kill(serverProcess.pid, 0);
+            console.error(`❌ System kill also failed for process ${serverProcess.pid}`);
+          } catch (e) {
+            console.log(`✓ System kill succeeded for process ${serverProcess.pid}`);
+            processKilled = true;
+          }
+        } catch (e) {
+          console.error(`❌ System kill command failed: ${e.message}`);
+        }
       }
     } catch (error) {
-      console.error(`Error killing test server: ${error.message}`);
+      console.error(`❌ Error killing test server ${serverProcess.pid}: ${error.message}`);
     }
+  } else {
+    processKilled = true; // No process to kill
   }
 
   // Remove database file with retry logic
+  let dbRemoved = false;
   let retries = 3;
   while (retries > 0) {
     try {
       if (fs.existsSync(dbPath)) {
         fs.unlinkSync(dbPath);
+        console.log(`✓ Removed database: ${dbPath}`);
+        dbRemoved = true;
+        break;
+      } else {
+        dbRemoved = true; // File doesn't exist, consider it removed
         break;
       }
     } catch (error) {
       retries--;
       if (retries === 0) {
-        console.error(`Error cleaning up test database after retries: ${error.message}`);
+        console.error(`❌ Error cleaning up test database after retries: ${error.message}`);
       } else {
         // Wait a bit before retrying
         await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
   }
+
+  return { processKilled, dbRemoved };
 }
 
 // Create a test fixture that provides an isolated server and database for each test
@@ -310,9 +381,32 @@ export const test = base.extend({
       port
     });
 
-    // Clean up after the test and remove from tracker
-    await cleanupTest(dbPath, server.process);
-    global.testResourceTracker.servers.delete(port);
-    global.testResourceTracker.databases.delete(dbPath);
+    // Clean up after the test - try multiple approaches
+    try {
+      // First attempt: individual cleanup
+      const cleanupResult = await cleanupTest(dbPath, server.process);
+
+      // Always remove from tracker regardless of cleanup result
+      // The global teardown will handle any remaining processes
+      global.testResourceTracker.servers.delete(port);
+      global.testResourceTracker.databases.delete(dbPath);
+
+      // If individual cleanup failed, try immediate system kill
+      if (!cleanupResult.processKilled && server.process && server.process.pid) {
+        console.log(`⚠ Individual cleanup failed, trying system kill for PID ${server.process.pid}`);
+        try {
+          const { execSync } = require('child_process');
+          execSync(`kill -9 ${server.process.pid}`, { stdio: 'ignore' });
+          console.log(`✓ System kill succeeded for PID ${server.process.pid}`);
+        } catch (e) {
+          console.log(`⚠ System kill also failed for PID ${server.process.pid}`);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error during test cleanup: ${error.message}`);
+      // Still remove from tracker to avoid duplicate cleanup attempts
+      global.testResourceTracker.servers.delete(port);
+      global.testResourceTracker.databases.delete(dbPath);
+    }
   }
 });
