@@ -19,11 +19,9 @@ Uptime Monitor is a web application that allows users to monitor the availabilit
 
 ### Running the Application
 
-```bash
-# Build the frontend
-bun run build
 
 # Start the server
+```bash
 bun run dev
 ```
 
@@ -102,12 +100,14 @@ Story 3: [ ] Add Monitor
 As a user, I want to add a monitor so that I can track its availability.
 Acceptance Criteria:
 * I can enter a URL in a form to add a monitor
-* After successful addition, I receive confirmation and can view my monitor in the dashboard
-
-Story 4: [ ] Monitor Status
-As a user, I want to see the status of my monitors so that I can know if they are up or down.
-Acceptance Criteria:
-* I can see the status of my monitors in the dashboard
+* After successful addition, I receive confirmation and can view my monitor and its status in the dashboard
 * The status is updated in real-time
-* I can see the last 24 hours of monitor history
+
+
+Story 4: [ ] Email Notifications
+As a user, I want to receive email notifications when my monitored sites go down so that I can take immediate action.
+Acceptance Criteria:
+* I can enable email notifications for each of my monitors
+* When a monitored site becomes unavailable, I receive an email notification
+* The email contains information about which site is down and when it went down
 

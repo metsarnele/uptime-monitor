@@ -6,9 +6,18 @@ import bcryptjs from 'bcryptjs';
 import { getTestDbPath, initTestDatabase, getTestPort, startTestServer, waitForServer, cleanupTest } from './testSetup';
 import fs from 'fs';
 
+/**
+ * @typedef {Object} TestServer
+ * @property {string} url - The server URL
+ * @property {Object} process - The server process
+ */
+
 test.describe('User Sign Up', () => {
+  /** @type {string} */
   let dbPath;
+  /** @type {TestServer} */
   let server;
+  /** @type {string} */
   let baseURL;
 
   // Setup: Create a test database and start a server before each test

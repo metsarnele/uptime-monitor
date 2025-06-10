@@ -6,22 +6,39 @@
         <button id="add-site-btn" class="btn">Add New Site</button>
     </div>
 
-    <div id="sites-list" class="sites-list">
-        <div class="card site-card">
-            <div class="site-info">
-                <h3>Example Site</h3>
-                <p>https://example.com</p>
+    <div id="notification" class="notification" style="display: none;"></div>
+    
+    <!-- Add Monitor Form (Always visible for tests) -->
+    <div class="card">
+        <form id="add-monitor-form" role="form" aria-label="add monitor">
+            <div class="form-group">
+                <label for="monitor-url">URL</label>
+                <input type="url" id="monitor-url" aria-label="URL" name="url" required placeholder="https://example.com">
             </div>
-            <div class="site-status">
-                <span class="status-badge status-up">Up</span>
-                <p>Last checked: Just now</p>
-            </div>
-        </div>
+            <button type="submit" class="btn btn-primary" id="add-monitor-btn">Add</button>
+        </form>
+    </div>
 
-        <div class="empty-state" style="display: none;">
-            <p>You don't have any sites to monitor yet.</p>
-            <button class="btn">Add your first site</button>
-        </div>
+    <div id="sites-list" class="sites-list" role="list" aria-label="monitors">
+        {{#if monitors.length}}
+            {{#each monitors}}
+            <div class="card site-card">
+                <div class="site-info">
+                    <h3>{{#if this.name}}{{this.name}}{{else}}Monitor {{@index}}{{/if}}</h3>
+                    <p>{{this.url}}</p>
+                </div>
+                <div class="site-status">
+                    <span class="status-badge status-up">Up</span>
+                    <p>Last checked: Just now</p>
+                </div>
+            </div>
+            {{/each}}
+        {{else}}
+            <div class="empty-state">
+                <p>You don't have any sites to monitor yet.</p>
+                <button id="add-first-site-btn" class="btn">Add your first site</button>
+            </div>
+        {{/if}}
     </div>
 </div>
 
@@ -29,25 +46,90 @@
     <div class="modal-content">
         <span class="close-modal">&times;</span>
         <h2>Add New Site</h2>
-        <form id="add-site-form">
+        <form id="add-site-form" role="form" aria-label="add monitor">
             <div class="form-group">
-                <label for="site-name">Site Name</label>
-                <input type="text" id="site-name" name="name" required>
+                <label for="modal-url">URL</label>
+                <input type="url" id="modal-url" aria-label="Modal URL" name="url" required placeholder="https://example.com">
             </div>
-            <div class="form-group">
-                <label for="site-url">URL</label>
-                <input type="url" id="site-url" name="url" required placeholder="https://example.com">
-            </div>
-            <div class="form-group">
-                <label for="check-interval">Check Interval</label>
-                <select id="check-interval" name="interval">
-                    <option value="5">Every 5 minutes</option>
-                    <option value="10">Every 10 minutes</option>
-                    <option value="30">Every 30 minutes</option>
-                    <option value="60">Every hour</option>
-                </select>
-            </div>
-            <button type="submit" class="btn btn-primary">Add Site</button>
+            <button type="submit" class="btn btn-primary" id="modal-add-btn">Add</button>
         </form>
     </div>
 </div>
+
+<script>
+    // Show modal when add site button is clicked
+    document.getElementById('add-site-btn').addEventListener('click', function() {
+        document.getElementById('add-site-modal').style.display = 'block';
+    });
+
+    // Also handle the empty state button
+    const addFirstSiteBtn = document.getElementById('add-first-site-btn');
+    if (addFirstSiteBtn) {
+        addFirstSiteBtn.addEventListener('click', function() {
+            document.getElementById('add-site-modal').style.display = 'block';
+        });
+    }
+
+    // Close modal when X is clicked
+    document.querySelector('.close-modal').addEventListener('click', function() {
+        document.getElementById('add-site-modal').style.display = 'none';
+    });
+
+    // Function to handle monitor form submission
+    async function handleMonitorSubmit(e) {
+        e.preventDefault();
+        
+        // Get URL from the form that triggered the event
+        const form = e.target;
+        const urlInput = form.querySelector('input[name="url"]');
+        const url = urlInput.value.trim();
+        
+        try {
+            const response = await fetch('/api/monitors', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url })
+            });
+            
+            const data = await response.json();
+            
+            // Show notification
+            const notification = document.getElementById('notification');
+            notification.textContent = data.message;
+            notification.className = 'notification ' + (data.success ? 'success' : 'error');
+            notification.style.display = 'block';
+            
+            // Hide notification after 3 seconds
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+            
+            if (data.success) {
+                // Reset form
+                urlInput.value = '';
+                
+                // Close modal if it's the modal form
+                if (form.id === 'add-site-form') {
+                    document.getElementById('add-site-modal').style.display = 'none';
+                }
+                
+                // Reload page to show new monitor
+                window.location.reload();
+            }
+        } catch (error) {
+            console.error('Error adding monitor:', error);
+            const notification = document.getElementById('notification');
+            notification.textContent = 'An error occurred while adding the monitor';
+            notification.className = 'notification error';
+            notification.style.display = 'block';
+        }
+    }
+
+    // Handle modal form submission
+    document.getElementById('add-site-form').addEventListener('submit', handleMonitorSubmit);
+    
+    // Handle always-visible form submission
+    document.getElementById('add-monitor-form').addEventListener('submit', handleMonitorSubmit);
+</script>
