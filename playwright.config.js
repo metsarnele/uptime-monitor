@@ -3,9 +3,9 @@
 
 export default {
   testDir: './tests/e2e',
-  timeout: 5 * 1000, // Increased for Firefox compatibility
+  timeout: 30 * 1000, // Increased timeout for Firefox compatibility
   expect: {
-    timeout: 5000
+    timeout: 10000 // Increased expect timeout
   },
   fullyParallel: true, // Enable parallel execution
   forbidOnly: !!process.env.CI,
@@ -15,7 +15,7 @@ export default {
   globalSetup: './tests/global-setup.js',
   globalTeardown: './tests/global-teardown.js',
   use: {
-    actionTimeout: 0,
+    actionTimeout: 10000, // Increased default action timeout
     // We'll set the baseURL dynamically in each test
     trace: 'on-first-retry',
   },
@@ -24,14 +24,16 @@ export default {
       name: 'chromium',
       use: {
         browserName: 'chromium',
+        actionTimeout: 5000, // Keep chromium fast
       },
     },
     {
       name: 'firefox',
       use: {
         browserName: 'firefox',
-        // Firefox can be slower, increase timeout
-        actionTimeout: 5000,
+        // Firefox can be slower, increase timeouts significantly
+        actionTimeout: 15000,
+        navigationTimeout: 15000,
       },
     },
   ],
