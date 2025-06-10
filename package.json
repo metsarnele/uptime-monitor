@@ -4,10 +4,13 @@
   "module": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "bun run --hot index.js",
+    "dev": "bun i; bun --hot index.js",
     "start": "bun index.js",
-    "build": "bun build ./client/src/index.jsx --outdir ./client/dist && cp ./client/public/index.html ./client/dist/index.html",
-    "test": "playwright test"
+    "test": "playwright test --reporter=list",
+    "test:debug": "DEBUG_CLEANUP=true playwright test --reporter=list",
+    "test:quiet": "DEBUG_CLEANUP=false playwright test --reporter=list",
+    "test:cleanup": "node scripts/cleanup-tracked-resources.js",
+    "test:legacy": "node scripts/run-tests.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -19,7 +22,8 @@
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.6"
+    "sqlite3": "^5.1.6",
+    "ws": "^8.18.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",

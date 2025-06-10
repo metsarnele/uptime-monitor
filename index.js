@@ -67,6 +67,15 @@ async function initDb() {
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS monitors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      url TEXT NOT NULL,
+      name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
 }
@@ -102,8 +111,18 @@ app.get('/signin', (req, res) => {
     res.render('signin', { registered });
 });
 
-app.get('/dashboard', requireAuth, (req, res) => {
-    res.render('dashboard');
+app.get('/dashboard', requireAuth, async (req, res) => {
+    try {
+        // Get all monitors for the current user
+        const monitors = await db.all(
+            'SELECT * FROM monitors WHERE user_id = ? ORDER BY created_at DESC',
+            [req.user.userId]
+        );
+        res.render('dashboard', { monitors });
+    } catch (error) {
+        console.error('Error fetching monitors:', error);
+        res.render('dashboard', { monitors: [], error: 'Failed to load monitors' });
+    }
 });
 
 app.get('/signout', (req, res) => {
@@ -169,6 +188,40 @@ app.post('/api/signin', async (req, res) => {
             success: false, 
             message: 'An error occurred during sign-in'
         });
+    }
+});
+
+// Monitor API routes
+app.post('/api/monitors', requireAuth, async (req, res) => {
+    try {
+        const { url } = req.body;
+        
+        // Validate URL format
+        const urlRegex = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\w \.-]*)*\/?$/;
+        if (!urlRegex.test(url)) {
+            return res.status(400).json({ success: false, message: 'Please enter a valid URL' });
+        }
+
+        // Check if user is already monitoring this URL
+        const existingMonitor = await db.get(
+            'SELECT * FROM monitors WHERE user_id = ? AND url = ?',
+            [req.user.userId, url]
+        );
+
+        if (existingMonitor) {
+            return res.status(400).json({ success: false, message: 'You are already monitoring this URL' });
+        }
+
+        // Add the new monitor
+        await db.run(
+            'INSERT INTO monitors (user_id, url) VALUES (?, ?)',
+            [req.user.userId, url]
+        );
+
+        res.json({ success: true, message: 'Monitor added successfully' });
+    } catch (error) {
+        console.error('Error adding monitor:', error);
+        res.status(500).json({ success: false, message: 'Failed to add monitor' });
     }
 });
 
