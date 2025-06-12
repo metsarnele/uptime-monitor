@@ -13,3 +13,5 @@ CREATE TABLE IF NOT EXISTS monitors (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+ALTER TABLE monitors ADD COLUMN email_notifications INTEGER DEFAULT 0;

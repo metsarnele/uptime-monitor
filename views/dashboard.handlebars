@@ -22,16 +22,23 @@
     <div id="sites-list" class="sites-list" role="list" aria-label="monitors">
         {{#if monitors.length}}
             {{#each monitors}}
-            <div class="card site-card">
-                <div class="site-info">
-                    <h3>{{#if this.name}}{{this.name}}{{else}}Monitor {{@index}}{{/if}}</h3>
-                    <p>{{this.url}}</p>
+                <div class="card site-card">
+                    <div class="site-info">
+                        <h3>{{#if this.name}}{{this.name}}{{else}}Monitor {{@index}}{{/if}}</h3>
+                        <p>{{this.url}}</p>
+                    </div>
+                    <div class="site-status">
+                        <span class="status-badge status-up">Up</span>
+                        <p>Last checked: Just now</p>
+                        <label>
+                            <input type="checkbox"
+                                   data-testid="email-notifications-toggle"
+                                   data-monitor-id="{{this.id}}"
+                                   {{#if this.email_notifications}}checked{{/if}}>
+                            Email notifications
+                        </label>
+                    </div>
                 </div>
-                <div class="site-status">
-                    <span class="status-badge status-up">Up</span>
-                    <p>Last checked: Just now</p>
-                </div>
-            </div>
             {{/each}}
         {{else}}
             <div class="empty-state">
@@ -132,4 +139,38 @@
     
     // Handle always-visible form submission
     document.getElementById('add-monitor-form').addEventListener('submit', handleMonitorSubmit);
+
+
+    document.addEventListener('change', function(e) {
+        if (e.target.dataset.testid === 'email-notifications-toggle') {
+            const monitorId = e.target.dataset.monitorId;
+            const enabled = e.target.checked;
+
+            // Kontrolli, kas monitori ID on olemas
+            if (!monitorId) {
+                console.error('Monitor ID is missing');
+                return;
+            }
+
+            fetch(`/api/monitors/${monitorId}/notifications`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email_notifications: enabled })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Email notification settings updated:', data);
+            })
+            .catch(error => {
+                console.error('Error updating email notifications:', error);
+                // Tagasi lülita checkbox, kui päring ebaõnnestus
+                e.target.checked = !enabled;
+            });
+        }
+    });
 </script>

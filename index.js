@@ -225,6 +225,19 @@ app.post('/api/monitors', requireAuth, async (req, res) => {
     }
 });
 
+app.put('/api/monitors/:id/notifications', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { email_notifications } = req.body;
+
+    await db.run(
+        'UPDATE monitors SET email_notifications = ? WHERE id = ? AND user_id = ?',
+        [email_notifications ? 1 : 0, id, req.user.userId]
+    );
+
+    res.json({ success: true });
+});
+
+
 // Start server
 initDb().then(() => {
     app.listen(PORT, () => {
