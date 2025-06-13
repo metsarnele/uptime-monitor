@@ -7,6 +7,11 @@ class EmailService {
         this.domain = process.env.MAILGUN_DOMAIN || 'mg.brigitakasemets.me';
         this.baseUrl = 'https://api.eu.mailgun.net/v3';
         this.fromEmail = `Uptime Monitor <postmaster@${this.domain}>`;
+        
+        // Test mode detection
+        this.isTestMode = process.env.NODE_ENV === 'test' || 
+                         process.env.NODE_ENV === 'ci' ||
+                         process.env.EMAIL_TEST_MODE === 'true';
     }
 
     /**
@@ -159,6 +164,19 @@ Uptime Monitor Team
      * Core method to send emails via Mailgun API
      */
     async sendEmail(to, subject, text, html = null) {
+        // In test mode, log the email but don't actually send it
+        if (this.isTestMode) {
+            console.log(`[TEST MODE] Would send email to ${to}: ${subject}`);
+            if (process.env.DEBUG === 'true') {
+                console.log(`Body preview: ${text.slice(0, 100)}...`);
+            }
+            return { 
+                success: true, 
+                messageId: `test-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+                testMode: true 
+            };
+        }
+
         if (!this.apiKey) {
             console.warn('Mailgun API key not configured. Email will not be sent.');
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {

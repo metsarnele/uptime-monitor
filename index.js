@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { engine } from 'express-handlebars';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
-import emailService from './services/emailService.js';
+import { getEmailService } from './services/emailServiceFactory.js';
 import monitorService from './services/monitorService.js';
 import cors from 'cors';
 import crypto from 'crypto';
@@ -19,13 +19,45 @@ const __dirname = path.dirname(__filename);
 // Load environment variables from .env file
 dotenv.config();
 
+// Initialize email service (will be set during startup)
+let emailService = null;
+
 // Check for important environment variables
-if (!process.env.JWT_SECRET) {
-    console.warn('WARNING: JWT_SECRET environment variable not set. Using random tokens which will invalidate existing sessions on server restart. Set JWT_SECRET in your .env file for production.');
+const requiredEnvVars = {
+    JWT_SECRET: 'JWT secret for signing authentication tokens',
+    MAILGUN_API_KEY: 'Mailgun API key for sending email notifications',
+    MAILGUN_DOMAIN: 'Mailgun domain for sending email notifications',
+    NODE_ENV: 'Node environment (development, production, test)'
+};
+
+const missingVars = [];
+
+for (const [varName, description] of Object.entries(requiredEnvVars)) {
+    if (!process.env[varName]) {
+        missingVars.push({ name: varName, description });
+    }
+}
+
+if (missingVars.length > 0) {
+    console.error('ERROR: Required environment variables are missing:');
+    console.error('');
+    missingVars.forEach(({ name, description }) => {
+        console.error(`  ${name}: ${description}`);
+    });
+    console.error('');
+    console.error('Please set these variables in your .env file or environment variables.');
+    console.error('See .env.example for reference.');
+    process.exit(1);
 }
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Validate PORT is a valid number
+if (isNaN(PORT) || PORT < 1 || PORT > 65535) {
+    console.error(`ERROR: PORT must be a valid number between 1 and 65535. Current value: ${PORT}`);
+    process.exit(1);
+}
 
 app.use(cors({
   origin: [
@@ -52,7 +84,7 @@ app.use((req, res, next) => {
 
     if (token) {
         try {
-            const verified = jwt.verify(token, process.env.JWT_SECRET || crypto.randomUUID());
+            const verified = jwt.verify(token, process.env.JWT_SECRET);
             req.user = verified;
             res.locals.isAuthenticated = true;
         } catch (error) {
@@ -133,7 +165,7 @@ const verifyToken = (req, res, next) => {
     }
 
     try {
-        const verified = jwt.verify(token, process.env.JWT_SECRET || crypto.randomUUID());
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
         req.user = verified;
         next();
     } catch (error) {
@@ -240,7 +272,7 @@ app.post('/api/signin', async (req, res) => {
             });
         }
 
-        const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET || crypto.randomUUID(), { expiresIn: '24h' });
+        const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
         res.cookie('authToken', token, { httpOnly: true });
 
@@ -459,19 +491,31 @@ app.get('/api/monitors', requireAuth, async (req, res) => {
 });
 
 // Start server
-initDb().then(() => {
-    app.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT}`);
+async function startServer() {
+    try {
+        await initDb();
         
-        // Log Mailgun configuration status
-        if (process.env.MAILGUN_API_KEY) {
-            console.log('✅ Mailgun configured - email notifications enabled');
-        } else {
-            console.log('⚠️  Mailgun not configured - email notifications disabled');
-            console.log('   Set MAILGUN_API_KEY and MAILGUN_DOMAIN environment variables');
-        }
-    });
-}).catch(error => {
-    console.error('Failed to initialize database:', error);
-    process.exit(1);
-});
+        // Initialize email service
+        emailService = await getEmailService();
+        console.log('📧 Email service initialized');
+        
+        app.listen(PORT, () => {
+            console.log(`Server running on http://localhost:${PORT}`);
+            
+            // Log email service configuration status
+            if (emailService.getSentEmails) {
+                console.log('🧪 Mock email service active - emails will be captured for testing');
+            } else if (process.env.MAILGUN_API_KEY) {
+                console.log('✅ Mailgun configured - email notifications enabled');
+            } else {
+                console.log('⚠️  Mailgun not configured - email notifications disabled');
+                console.log('   Set MAILGUN_API_KEY and MAILGUN_DOMAIN environment variables');
+            }
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+}
+
+startServer();

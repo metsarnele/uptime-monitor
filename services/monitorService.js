@@ -2,11 +2,12 @@
 import fetch from 'node-fetch';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import emailService from './emailService.js';
+import { getEmailService } from './emailServiceFactory.js';
 
 class MonitorService {
     constructor() {
         this.db = null;
+        this.emailService = null;
         this.monitoringInterval = null;
         this.isRunning = false;
         this.checkIntervalMs = process.env.MONITORING_INTERVAL 
@@ -23,6 +24,10 @@ class MonitorService {
         // Create additional tables for monitoring
         await this.createMonitoringTables();
         
+        // Initialize email service from factory
+        this.emailService = await getEmailService();
+        console.log('📧 Email service initialized');
+
         console.log('Monitor service initialized');
     }
 
@@ -238,7 +243,7 @@ class MonitorService {
      */
     async sendDownNotification(monitor, errorMessage) {
         try {
-            const result = await emailService.sendDownNotification(
+            const result = await this.emailService.sendDownNotification(
                 monitor.user_email,
                 monitor.url,
                 monitor.name
@@ -291,7 +296,7 @@ class MonitorService {
                 downDuration = this.formatDuration(downTime);
             }
 
-            const result = await emailService.sendUpNotification(
+            const result = await this.emailService.sendUpNotification(
                 monitor.user_email,
                 monitor.url,
                 monitor.name,

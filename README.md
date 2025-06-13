@@ -26,9 +26,23 @@ Copy the `.env.example` file to `.env` and update the values as needed:
 cp .env.example .env
 ```
 
-At minimum, you should configure:
-- `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` for email notifications
-- `JWT_SECRET` for secure authentication (can be any random string)
+**Required Environment Variables:**
+- `JWT_SECRET` - **REQUIRED**: A secure secret key for JWT token signing. Generate a strong random string for production.
+- `MAILGUN_API_KEY` - **REQUIRED**: Your Mailgun API key for sending email notifications when sites go down.
+- `MAILGUN_DOMAIN` - **REQUIRED**: Your Mailgun domain for sending email notifications.
+- `NODE_ENV` - **REQUIRED**: Environment mode (development/production/test).
+
+**Optional Environment Variables:**
+- `PORT` - Server port (defaults to 3000)
+
+**Important**: The application will not start if any required environment variables are missing. You can generate a secure JWT secret with:
+```bash
+# Using Node.js
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+
+# Using OpenSSL
+openssl rand -hex 64
+```
 
 ### Running the Application
 
