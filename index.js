@@ -7,12 +7,37 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { engine } from 'express-handlebars';
 import cookieParser from 'cookie-parser';
+import dotenv from 'dotenv';
+import emailService from './services/emailService.js';
+import monitorService from './services/monitorService.js';
+import cors from 'cors';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Load environment variables from .env file
+dotenv.config();
+
+// Check for important environment variables
+if (!process.env.JWT_SECRET) {
+    console.warn('WARNING: JWT_SECRET environment variable not set. Using random tokens which will invalidate existing sessions on server restart. Set JWT_SECRET in your .env file for production.');
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.use(cors({
+  origin: [
+    'https://mg.brigitakasemets.me',
+    'https://monitor.brigitakasemets.me',
+    'http://localhost:3000', // development
+    'http://localhost:3001', // development backup
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Middleware
 app.use(express.json());
@@ -27,7 +52,7 @@ app.use((req, res, next) => {
 
     if (token) {
         try {
-            const verified = jwt.verify(token, 'secret_key');
+            const verified = jwt.verify(token, process.env.JWT_SECRET || crypto.randomUUID());
             req.user = verified;
             res.locals.isAuthenticated = true;
         } catch (error) {
@@ -46,7 +71,13 @@ const requireAuth = (req, res, next) => {
 };
 
 // Setup Handlebars
-app.engine('handlebars', engine());
+app.engine('handlebars', engine({
+    helpers: {
+        eq: function(a, b) {
+            return a === b;
+        }
+    }
+}));
 app.set('view engine', 'handlebars');
 app.set('views', path.join(__dirname, 'views'));
 
@@ -74,10 +105,23 @@ async function initDb() {
       user_id INTEGER NOT NULL,
       url TEXT NOT NULL,
       name TEXT,
+      status TEXT DEFAULT 'pending',
+      last_checked DATETIME,
+      response_time INTEGER,
+      notifications_enabled BOOLEAN DEFAULT 1,
+      last_notification_sent DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+    // Initialize monitoring service
+    await monitorService.initialize(db);
+    
+    // Start monitoring in production
+    if (process.env.NODE_ENV !== 'test') {
+        monitorService.startMonitoring();
+    }
 }
 
 // Helper middleware for token verification
@@ -89,7 +133,7 @@ const verifyToken = (req, res, next) => {
     }
 
     try {
-        const verified = jwt.verify(token, 'secret_key');
+        const verified = jwt.verify(token, process.env.JWT_SECRET || crypto.randomUUID());
         req.user = verified;
         next();
     } catch (error) {
@@ -99,6 +143,10 @@ const verifyToken = (req, res, next) => {
 
 // Routes - Views
 app.get('/', (req, res) => {
+    // Redirect authenticated users to dashboard
+    if (res.locals.isAuthenticated) {
+        return res.redirect('/dashboard');
+    }
     res.render('home');
 });
 
@@ -113,11 +161,26 @@ app.get('/signin', (req, res) => {
 
 app.get('/dashboard', requireAuth, async (req, res) => {
     try {
-        // Get all monitors for the current user
-        const monitors = await db.all(
-            'SELECT * FROM monitors WHERE user_id = ? ORDER BY created_at DESC',
-            [req.user.userId]
-        );
+        // Get all monitors for the current user with their latest stats
+        const monitors = await db.all(`
+            SELECT 
+                m.*,
+                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.checked_at > datetime('now', '-24 hours')) as checks_today,
+                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.status = 'up' AND h.checked_at > datetime('now', '-24 hours')) as up_checks_today
+            FROM monitors m 
+            WHERE m.user_id = ? 
+            ORDER BY m.created_at DESC
+        `, [req.user.userId]);
+
+        // Calculate uptime percentage for each monitor
+        monitors.forEach(monitor => {
+            if (monitor.checks_today > 0) {
+                monitor.uptime_percentage = ((monitor.up_checks_today / monitor.checks_today) * 100).toFixed(1);
+            } else {
+                monitor.uptime_percentage = 0;
+            }
+        });
+
         res.render('dashboard', { monitors });
     } catch (error) {
         console.error('Error fetching monitors:', error);
@@ -153,6 +216,11 @@ app.post('/api/signup', async (req, res) => {
             [email, hashedPassword]
         );
 
+        // Send welcome email
+        emailService.sendWelcomeEmail(email).catch(error => {
+            console.error('Failed to send welcome email:', error);
+        });
+
         res.json({ message: 'Account created successfully' });
     } catch (error) {
         res.status(400).json({ error: 'Email already exists' });
@@ -172,7 +240,7 @@ app.post('/api/signin', async (req, res) => {
             });
         }
 
-        const token = jwt.sign({ userId: user.id, email: user.email }, 'secret_key', { expiresIn: '24h' });
+        const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET || crypto.randomUUID(), { expiresIn: '24h' });
 
         res.cookie('authToken', token, { httpOnly: true });
 
@@ -194,7 +262,7 @@ app.post('/api/signin', async (req, res) => {
 // Monitor API routes
 app.post('/api/monitors', requireAuth, async (req, res) => {
     try {
-        const { url } = req.body;
+        const { url, name, notifications_enabled = true } = req.body;
         
         // Validate URL format
         const urlRegex = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\w \.-]*)*\/?$/;
@@ -213,10 +281,23 @@ app.post('/api/monitors', requireAuth, async (req, res) => {
         }
 
         // Add the new monitor
-        await db.run(
-            'INSERT INTO monitors (user_id, url) VALUES (?, ?)',
-            [req.user.userId, url]
+        const result = await db.run(
+            'INSERT INTO monitors (user_id, url, name, notifications_enabled) VALUES (?, ?, ?, ?)',
+            [req.user.userId, url, name || null, notifications_enabled ? 1 : 0]
         );
+
+        // Immediately check the new monitor
+        const newMonitor = await db.get(`
+            SELECT m.*, u.email as user_email 
+            FROM monitors m 
+            JOIN users u ON m.user_id = u.id 
+            WHERE m.id = ?
+        `, [result.lastID]);
+
+        // Check the monitor status asynchronously
+        monitorService.checkMonitor(newMonitor).catch(error => {
+            console.error('Failed to check new monitor:', error);
+        });
 
         res.json({ success: true, message: 'Monitor added successfully' });
     } catch (error) {
@@ -225,9 +306,172 @@ app.post('/api/monitors', requireAuth, async (req, res) => {
     }
 });
 
+// Update monitor settings
+app.put('/api/monitors/:id', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, notifications_enabled } = req.body;
+
+        // Verify the monitor belongs to the user
+        const monitor = await db.get(
+            'SELECT * FROM monitors WHERE id = ? AND user_id = ?',
+            [id, req.user.userId]
+        );
+
+        if (!monitor) {
+            return res.status(404).json({ success: false, message: 'Monitor not found' });
+        }
+
+        // Update monitor
+        await db.run(
+            'UPDATE monitors SET name = ?, notifications_enabled = ? WHERE id = ?',
+            [name || null, notifications_enabled ? 1 : 0, id]
+        );
+
+        res.json({ success: true, message: 'Monitor updated successfully' });
+    } catch (error) {
+        console.error('Error updating monitor:', error);
+        res.status(500).json({ success: false, message: 'Failed to update monitor' });
+    }
+});
+
+// Delete monitor
+app.delete('/api/monitors/:id', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Verify the monitor belongs to the user
+        const monitor = await db.get(
+            'SELECT * FROM monitors WHERE id = ? AND user_id = ?',
+            [id, req.user.userId]
+        );
+
+        if (!monitor) {
+            return res.status(404).json({ success: false, message: 'Monitor not found' });
+        }
+
+        // Delete monitor and its history
+        await db.run('DELETE FROM notification_log WHERE monitor_id = ?', [id]);
+        await db.run('DELETE FROM monitor_status_history WHERE monitor_id = ?', [id]);
+        await db.run('DELETE FROM monitors WHERE id = ?', [id]);
+
+        res.json({ success: true, message: 'Monitor deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting monitor:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete monitor' });
+    }
+});
+
+// Get monitor stats
+app.get('/api/monitors/:id/stats', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { hours = 24 } = req.query;
+
+        // Verify the monitor belongs to the user
+        const monitor = await db.get(
+            'SELECT * FROM monitors WHERE id = ? AND user_id = ?',
+            [id, req.user.userId]
+        );
+
+        if (!monitor) {
+            return res.status(404).json({ success: false, message: 'Monitor not found' });
+        }
+
+        const stats = await monitorService.getMonitorStats(id, parseInt(hours));
+        
+        // Get recent status history
+        const history = await db.all(`
+            SELECT status, response_time, checked_at, error_message
+            FROM monitor_status_history 
+            WHERE monitor_id = ? 
+            AND checked_at > datetime('now', '-${parseInt(hours)} hours')
+            ORDER BY checked_at DESC
+            LIMIT 100
+        `, [id]);
+
+        res.json({ 
+            success: true, 
+            monitor,
+            stats,
+            history 
+        });
+    } catch (error) {
+        console.error('Error getting monitor stats:', error);
+        res.status(500).json({ success: false, message: 'Failed to get monitor stats' });
+    }
+});
+
+// Test email configuration
+console.log('Registering /api/test-email endpoint');
+app.post('/api/test-email', requireAuth, async (req, res) => {
+    console.log('Processing test email request from user:', req.user?.userId);
+    try {
+        const user = await db.get('SELECT email FROM users WHERE id = ?', [req.user.userId]);
+        
+        if (!user) {
+            console.log('User not found for test email');
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        console.log('Sending test email to:', user.email);
+        const result = await emailService.testConfiguration(user.email);
+        
+        console.log('Email test result:', result);
+        if (result.success) {
+            res.json({ success: true, message: 'Test email sent successfully' });
+        } else {
+            res.status(500).json({ success: false, message: result.error });
+        }
+    } catch (error) {
+        console.error('Error sending test email:', error);
+        res.status(500).json({ success: false, message: 'Failed to send test email' });
+    }
+});
+
+// Get all monitors for user
+app.get('/api/monitors', requireAuth, async (req, res) => {
+    try {
+        const monitors = await db.all(`
+            SELECT 
+                m.*,
+                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.checked_at > datetime('now', '-24 hours')) as checks_today,
+                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.status = 'up' AND h.checked_at > datetime('now', '-24 hours')) as up_checks_today
+            FROM monitors m 
+            WHERE m.user_id = ? 
+            ORDER BY m.created_at DESC
+        `, [req.user.userId]);
+
+        // Calculate uptime percentage for each monitor
+        monitors.forEach(monitor => {
+            if (monitor.checks_today > 0) {
+                monitor.uptime_percentage = ((monitor.up_checks_today / monitor.checks_today) * 100).toFixed(1);
+            } else {
+                monitor.uptime_percentage = 0;
+            }
+        });
+
+        res.json({ success: true, monitors });
+    } catch (error) {
+        console.error('Error fetching monitors:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch monitors' });
+    }
+});
+
 // Start server
 initDb().then(() => {
     app.listen(PORT, () => {
         console.log(`Server running on http://localhost:${PORT}`);
+        
+        // Log Mailgun configuration status
+        if (process.env.MAILGUN_API_KEY) {
+            console.log('✅ Mailgun configured - email notifications enabled');
+        } else {
+            console.log('⚠️  Mailgun not configured - email notifications disabled');
+            console.log('   Set MAILGUN_API_KEY and MAILGUN_DOMAIN environment variables');
+        }
     });
+}).catch(error => {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
 });

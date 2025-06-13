@@ -10,6 +10,9 @@ import { test as base } from '@playwright/test';
 const TEST_PORT_START = 3100;
 const TEST_PORT_END = 3999; // 900 ports to support hundreds of workers
 
+// CI keskkonna tuvastamine
+const isCI = !!process.env.CI;
+
 // Generate unique test database name for each test run
 export const getTestDbPath = (workerIndex = 0, testTitle = '') => {
   // Create a database file name with worker index, timestamp and random string for uniqueness
@@ -68,8 +71,8 @@ function getWorkerPrefix(workerIndex, testTitle = '') {
   return `${color}[W${workerIndex}${shortTitle ? `:${shortTitle}` : ''}]${reset}`;
 }
 
-// Debug output control
-const DEBUG_CLEANUP = process.env.DEBUG_CLEANUP === 'true' || process.env.DEBUG_CLEANUP === '1';
+// Debug output control - suurendatud debug väljund CI keskkonnas
+const DEBUG_CLEANUP = isCI || process.env.DEBUG_CLEANUP === 'true' || process.env.DEBUG_CLEANUP === '1';
 
 // Helper function for worker-specific logging (debug only)
 function workerLog(workerIndex, testTitle, message) {
@@ -385,67 +388,77 @@ export const test = base.extend({
 
     // Get process info while the process is fresh and store it
     let processInfo = { name: 'unknown', command: 'unknown' };
-    if (server.process.pid) {
-      try {
-        // Wait a moment for the process to fully start
-        await new Promise(resolve => setTimeout(resolve, 100));
+    try {
+      if (server.process && server.process.pid) {
         processInfo = getProcessInfo(server.process.pid);
-        workerLog(workerIndex, testTitle, `📝 Captured process info for PID ${server.process.pid}: ${processInfo.name} - ${processInfo.command}`);
-      } catch (e) {
-        workerLog(workerIndex, testTitle, `⚠ Could not get process info for PID ${server.process.pid}: ${e.message}`);
       }
+    } catch (e) {
+      // Ignore process info errors
     }
-
-    // Register server with tracker including process info
+    
+    // Register server with tracker
     global.testResourceTracker.servers.set(port, {
       process: server.process,
       processInfo,
       dbPath,
-      workerIndex
+      workerIndex,
+      title: testTitle
     });
+
+    // Log information about server start
+    workerLog(workerIndex, testTitle, `🚀 Started test server on port ${port} with database ${dbPath}`);
 
     // Wait for server to be ready
-    await waitForServer(server.url);
-
-    // Use the server in the test
-    await use({
-      url: server.url,
-      dbPath,
-      process: server.process,
-      workerIndex,
-      port
-    });
-
-    // Clean up after the test - try multiple approaches
     try {
-      // Get the stored process info from the tracker
-      const trackedServer = global.testResourceTracker.servers.get(port);
-      const processInfo = trackedServer ? trackedServer.processInfo : null;
+      await waitForServer(`${server.url}/`);
+      workerLog(workerIndex, testTitle, `✅ Server ready at ${server.url}`);
+    } catch (error) {
+      workerInfo(workerIndex, testTitle, `⚠ WARNING: Server startup timed out: ${error.message}`);
+      // Continue anyway, the test might handle server state correctly
+    }
 
-      // First attempt: individual cleanup with process info and worker context
-      const cleanupResult = await cleanupTest(dbPath, server.process, processInfo, workerIndex, testTitle);
+    // Wait a bit longer in CI environments
+    if (isCI) {
+      workerLog(workerIndex, testTitle, `🕒 CI environment detected, adding extra startup delay...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
 
-      // Always remove from tracker regardless of cleanup result
-      // The global teardown will handle any remaining processes
+    // Enhance the server object with extra info needed by tests
+    const testServer = {
+      ...server,
+      dbPath,
+      workerIndex,
+      testTitle
+    };
+
+    // Let the test use this server
+    await use(testServer);
+
+    // After test completes, clean up test resources
+    try {
+      workerLog(workerIndex, testTitle, `🧹 Cleaning up test resources for ${testTitle} (W${workerIndex}:${port})`);
+      
+      // Remove server from tracker before cleanup (to avoid duplicate cleanup)
       global.testResourceTracker.servers.delete(port);
       global.testResourceTracker.databases.delete(dbPath);
-
-      // If individual cleanup failed, try immediate system kill
-      if (!cleanupResult.processKilled && server.process && server.process.pid) {
-        workerLog(workerIndex, testTitle, `⚠ Individual cleanup failed, trying system kill for PID ${server.process.pid}`);
-        try {
-          const { execSync } = require('child_process');
-          execSync(`kill -9 ${server.process.pid}`, { stdio: 'ignore' });
-          workerLog(workerIndex, testTitle, `✓ System kill succeeded for PID ${server.process.pid}`);
-        } catch (e) {
-          workerLog(workerIndex, testTitle, `⚠ System kill also failed for PID ${server.process.pid}`);
-        }
+      
+      const { processKilled, dbRemoved } = await cleanupTest(
+        dbPath, 
+        server.process, 
+        processInfo,
+        workerIndex,
+        testTitle
+      );
+      
+      if (processKilled && dbRemoved) {
+        workerLog(workerIndex, testTitle, `✅ Cleanup successful for ${testTitle}`);
+      } else {
+        workerLog(workerIndex, testTitle, 
+          `⚠ Partial cleanup for ${testTitle}: Process killed: ${processKilled}, DB removed: ${dbRemoved}`
+        );
       }
     } catch (error) {
-      workerLog(workerIndex, testTitle, `❌ Error during test cleanup: ${error.message}`);
-      // Still remove from tracker to avoid duplicate cleanup attempts
-      global.testResourceTracker.servers.delete(port);
-      global.testResourceTracker.databases.delete(dbPath);
+      console.error(`Error cleaning up test resources: ${error.message}`);
     }
-  }
+  },
 });

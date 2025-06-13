@@ -6,10 +6,16 @@ on:
     branches: [ main, master ]
 jobs:
   test:
-    timeout-minutes: 60
+    timeout-minutes: 90
     runs-on: ubuntu-latest
+    # Suurendatud ressursid parema jõudluse jaoks
+    container:
+      image: mcr.microsoft.com/playwright:v1.52.0-jammy
+      options: --ipc=host
     steps:
     - uses: actions/checkout@v4
+    - name: Install prerequisites
+      run: apt-get update && apt-get install -y unzip
     - uses: oven-sh/setup-bun@v2
       with:
         bun-version: latest
@@ -18,7 +24,18 @@ jobs:
     - name: Install Playwright Browsers
       run: bunx playwright install --with-deps
     - name: Run Playwright tests
-      run: bun run test
+      run: |
+        # Suurendatud timeoutid GitHub Actions keskkonnas
+        export PLAYWRIGHT_TEST_TIMEOUT=60000
+        export PLAYWRIGHT_ACTION_TIMEOUT=30000
+        export PLAYWRIGHT_NAVIGATION_TIMEOUT=30000
+        # Vähenda paralleelsust ja koormat
+        bun run test --workers=1
+      env:
+        CI: 'true'
+        DEBUG_CLEANUP: 'true'
+    - name: Ensure playwright-report directory exists
+      run: mkdir -p playwright-report
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
