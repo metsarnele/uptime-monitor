@@ -12,8 +12,8 @@
             <div class="nav-container">
                 <h1>Uptime Monitor</h1>
                 <div class="nav-links">
-                    <a href="/">Home</a>
                     {{#unless isAuthenticated}}
+                        <a href="/">Home</a>
                         <a href="/signup">Sign Up</a>
                         <a href="/signin">Sign In</a>
                     {{else}}

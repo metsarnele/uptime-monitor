@@ -2,175 +2,555 @@
     <h1>Dashboard</h1>
 
     <div class="dashboard-header">
-        <p>Welcome back! Here you can monitor your websites.</p>
-        <button id="add-site-btn" class="btn">Add New Site</button>
+        <p>Welcome back! Here you can monitor your websites and manage notifications.</p>
+        <div class="header-actions">
+            <button id="test-email-btn" class="btn btn-secondary">Test Email</button>
+        </div>
     </div>
 
     <div id="notification" class="notification" style="display: none;"></div>
     
-    <!-- Add Monitor Form (Always visible for tests) -->
+    <!-- Add Monitor Form -->
     <div class="card">
+        <h3>Add New Monitor</h3>
         <form id="add-monitor-form" role="form" aria-label="add monitor">
-            <div class="form-group">
-                <label for="monitor-url">URL</label>
-                <input type="url" id="monitor-url" aria-label="URL" name="url" required placeholder="https://example.com">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="monitor-url">URL</label>
+                    <input type="url" id="monitor-url" aria-label="URL" name="url" required placeholder="https://example.com">
+                </div>
+                <div class="form-group">
+                    <label for="monitor-name">Name (Optional)</label>
+                    <input type="text" id="monitor-name" name="name" placeholder="My Website">
+                </div>
             </div>
-            <button type="submit" class="btn btn-primary" id="add-monitor-btn">Add</button>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="notifications-enabled" name="notifications_enabled" checked>
+                    Enable email notifications
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary" id="add-monitor-btn">Add Monitor</button>
         </form>
     </div>
 
     <div id="sites-list" class="sites-list" role="list" aria-label="monitors">
         {{#if monitors.length}}
             {{#each monitors}}
-                <div class="card site-card">
-                    <div class="site-info">
-                        <h3>{{#if this.name}}{{this.name}}{{else}}Monitor {{@index}}{{/if}}</h3>
-                        <p>{{this.url}}</p>
+            <div class="card monitor-card" data-monitor-id="{{this.id}}">
+                <div class="monitor-header">
+                    <div class="monitor-info">
+                        <h3>{{#if this.name}}{{this.name}}{{else}}{{this.url}}{{/if}}</h3>
+                        {{#if this.name}}<p class="monitor-url">{{this.url}}</p>{{/if}}
                     </div>
-                    <div class="site-status">
-                        <span class="status-badge status-up">Up</span>
-                        <p>Last checked: Just now</p>
-                        <label>
-                            <input type="checkbox"
-                                   data-testid="email-notifications-toggle"
-                                   data-monitor-id="{{this.id}}"
-                                   {{#if this.email_notifications}}checked{{/if}}>
-                            Email notifications
-                        </label>
+                    <div class="monitor-actions">
+                        <button class="btn btn-small edit-monitor-btn" data-id="{{this.id}}">Edit</button>
+                        <button class="btn btn-small btn-danger delete-monitor-btn" data-id="{{this.id}}">Delete</button>
                     </div>
                 </div>
+                
+                <div class="monitor-status">
+                    <div class="status-indicator">
+                        <span class="status-badge status-{{this.status}}">
+                            {{#if (eq this.status 'up')}}✅ Up{{else if (eq this.status 'down')}}❌ Down{{else}}⏳ Checking{{/if}}
+                        </span>
+                        {{#if this.uptime_percentage}}
+                        <span class="uptime-badge">{{this.uptime_percentage}}% uptime (24h)</span>
+                        {{/if}}
+                    </div>
+                    
+                    <div class="status-details">
+                        {{#if this.last_checked}}
+                        <p>Last checked: <span class="time-ago" data-time="{{this.last_checked}}">{{this.last_checked}}</span></p>
+                        {{/if}}
+                        {{#if this.response_time}}
+                        <p>Response time: {{this.response_time}}ms</p>
+                        {{/if}}
+                        <p>Notifications: 
+                            <span class="notification-status {{#if this.notifications_enabled}}enabled{{else}}disabled{{/if}}">
+                                {{#if this.notifications_enabled}}Enabled{{else}}Disabled{{/if}}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="monitor-chart">
+                    <button class="btn btn-small view-stats-btn" data-id="{{this.id}}">View Statistics</button>
+                </div>
+            </div>
             {{/each}}
         {{else}}
             <div class="empty-state">
-                <p>You don't have any sites to monitor yet.</p>
-                <button id="add-first-site-btn" class="btn">Add your first site</button>
+                <h3>No monitors yet</h3>
+                <p>Add your first website to start monitoring its uptime and receive notifications when it goes down.</p>
+                <button id="add-first-site-btn" class="btn btn-primary">Add your first site</button>
             </div>
         {{/if}}
     </div>
 </div>
 
-<div id="add-site-modal" class="modal" style="display: none;">
+<!-- Edit Monitor Modal -->
+<div id="edit-monitor-modal" class="modal" style="display: none;">
     <div class="modal-content">
         <span class="close-modal">&times;</span>
-        <h2>Add New Site</h2>
-        <form id="add-site-form" role="form" aria-label="add monitor">
+        <h2>Edit Monitor</h2>
+        <form id="edit-monitor-form">
+            <input type="hidden" id="edit-monitor-id">
             <div class="form-group">
-                <label for="modal-url">URL</label>
-                <input type="url" id="modal-url" aria-label="Modal URL" name="url" required placeholder="https://example.com">
+                <label for="edit-monitor-name">Name (Optional)</label>
+                <input type="text" id="edit-monitor-name" name="name">
             </div>
-            <button type="submit" class="btn btn-primary" id="modal-add-btn">Add</button>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="edit-notifications-enabled" name="notifications_enabled">
+                    Enable email notifications
+                </label>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary close-modal">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="save-monitor-btn">Save Changes</button>
+            </div>
         </form>
     </div>
 </div>
 
-<script>
-    // Show modal when add site button is clicked
-    document.getElementById('add-site-btn').addEventListener('click', function() {
-        document.getElementById('add-site-modal').style.display = 'block';
-    });
+<!-- Monitor Statistics Modal -->
+<div id="stats-modal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <span class="close-modal">&times;</span>
+        <h2 id="stats-title">Monitor Statistics</h2>
+        <div id="stats-content">
+            <div class="loading">Loading statistics...</div>
+        </div>
+    </div>
+</div>
 
-    // Also handle the empty state button
-    const addFirstSiteBtn = document.getElementById('add-first-site-btn');
-    if (addFirstSiteBtn) {
-        addFirstSiteBtn.addEventListener('click', function() {
-            document.getElementById('add-site-modal').style.display = 'block';
+<style>
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.header-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.form-row {
+    display: flex;
+    gap: 1rem;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.monitor-card {
+    border-left: 4px solid #ddd;
+}
+
+.monitor-card[data-status="up"] {
+    border-left-color: #4caf50;
+}
+
+.monitor-card[data-status="down"] {
+    border-left-color: #f44336;
+}
+
+.monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.monitor-url {
+    color: #666;
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+.monitor-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-small {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+}
+
+.btn-danger {
+    background-color: #dc3545;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+}
+
+.monitor-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.status-indicator {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.status-up {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-down {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+.status-pending {
+    background-color: #fff3e0;
+    color: #f57c00;
+}
+
+.uptime-badge {
+    background-color: #e3f2fd;
+    color: #1976d2;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+.status-details p {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.notification-status.enabled {
+    color: #2e7d32;
+    font-weight: 500;
+}
+
+.notification-status.disabled {
+    color: #757575;
+}
+
+.modal-large .modal-content {
+    max-width: 800px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.loading {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #1976d2;
+}
+
+.stat-label {
+    color: #666;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+</style>
+
+<script>
+// Time ago functionality
+function updateTimeAgo() {
+    document.querySelectorAll('.time-ago').forEach(element => {
+        const time = element.getAttribute('data-time');
+        if (time) {
+            const date = new Date(time);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) {
+                element.textContent = 'Just now';
+            } else if (diff < 3600000) {
+                element.textContent = Math.floor(diff / 60000) + ' minutes ago';
+            } else if (diff < 86400000) {
+                element.textContent = Math.floor(diff / 3600000) + ' hours ago';
+            } else {
+                element.textContent = Math.floor(diff / 86400000) + ' days ago';
+            }
+        }
+    });
+}
+
+// Update time ago every minute
+updateTimeAgo();
+setInterval(updateTimeAgo, 60000);
+
+// Show notification function
+function showNotification(message, type = 'info') {
+    const notification = document.getElementById('notification');
+    notification.textContent = message;
+    notification.className = `notification ${type}`;
+    notification.style.display = 'block';
+    
+    setTimeout(() => {
+        notification.style.display = 'none';
+    }, 5000);
+}
+
+// Test email functionality
+document.getElementById('test-email-btn').addEventListener('click', async function() {
+    try {
+        const response = await fetch('/api/test-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showNotification('Test email sent successfully! Check your inbox.', 'success');
+        } else {
+            showNotification(data.message || 'Failed to send test email', 'error');
+        }
+    } catch (error) {
+        showNotification('Error sending test email', 'error');
+    }
+});
+
+// Add monitor form submission
+document.getElementById('add-monitor-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const data = {
+        url: formData.get('url'),
+        name: formData.get('name'),
+        notifications_enabled: formData.get('notifications_enabled') === 'on'
+    };
+    
+    try {
+        const response = await fetch('/api/monitors', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Monitor added successfully!', 'success');
+            this.reset();
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showNotification(result.message || 'Failed to add monitor', 'error');
+        }
+    } catch (error) {
+        showNotification('Error adding monitor', 'error');
+    }
+});
+
+// Edit monitor functionality
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('edit-monitor-btn')) {
+        const monitorId = e.target.getAttribute('data-id');
+        const monitorCard = e.target.closest('.monitor-card');
+        const name = monitorCard.querySelector('h3').textContent;
+        const notificationsEnabled = monitorCard.querySelector('.notification-status').classList.contains('enabled');
+        
+        document.getElementById('edit-monitor-id').value = monitorId;
+        document.getElementById('edit-monitor-name').value = name === monitorCard.querySelector('.monitor-url')?.textContent ? '' : name;
+        document.getElementById('edit-notifications-enabled').checked = notificationsEnabled;
+        
+        document.getElementById('edit-monitor-modal').style.display = 'block';
+    }
+});
+
+// Edit monitor form submission
+document.getElementById('edit-monitor-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const monitorId = document.getElementById('edit-monitor-id').value;
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name'),
+        notifications_enabled: formData.get('notifications_enabled') === 'on'
+    };
+    
+    try {
+        const response = await fetch(`/api/monitors/${monitorId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Monitor updated successfully!', 'success');
+            document.getElementById('edit-monitor-modal').style.display = 'none';
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showNotification(result.message || 'Failed to update monitor', 'error');
+        }
+    } catch (error) {
+        showNotification('Error updating monitor', 'error');
+    }
+});
+
+// Delete monitor functionality
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('delete-monitor-btn')) {
+        const monitorId = e.target.getAttribute('data-id');
+        
+        if (confirm('Are you sure you want to delete this monitor? This action cannot be undone.')) {
+            deleteMonitor(monitorId);
+        }
+    }
+});
+
+async function deleteMonitor(monitorId) {
+    try {
+        const response = await fetch(`/api/monitors/${monitorId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Monitor deleted successfully!', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showNotification(result.message || 'Failed to delete monitor', 'error');
+        }
+    } catch (error) {
+        showNotification('Error deleting monitor', 'error');
+    }
+}
+
+// View statistics functionality
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('view-stats-btn')) {
+        const monitorId = e.target.getAttribute('data-id');
+        showMonitorStats(monitorId);
+    }
+});
+
+async function showMonitorStats(monitorId) {
+    const modal = document.getElementById('stats-modal');
+    const content = document.getElementById('stats-content');
+    
+    modal.style.display = 'block';
+    content.innerHTML = '<div class="loading">Loading statistics...</div>';
+    
+    try {
+        const response = await fetch(`/api/monitors/${monitorId}/stats`);
+        const result = await response.json();
+        
+        if (result.success) {
+            const { monitor, stats, history } = result;
+            
+            document.getElementById('stats-title').textContent = `Statistics: ${monitor.name || monitor.url}`;
+            
+            content.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.uptime_percentage}%</div>
+                        <div class="stat-label">Uptime (24h)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total_checks}</div>
+                        <div class="stat-label">Total Checks</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${Math.round(stats.avg_response_time || 0)}ms</div>
+                        <div class="stat-label">Avg Response Time</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.down_checks}</div>
+                        <div class="stat-label">Downtime Events</div>
+                    </div>
+                </div>
+                
+                <h3>Recent History</h3>
+                <div class="history-list">
+                    ${history.map(h => `
+                        <div class="history-item">
+                            <span class="status-badge status-${h.status}">${h.status.toUpperCase()}</span>
+                            <span>${h.response_time ? h.response_time + 'ms' : 'N/A'}</span>
+                            <span>${new Date(h.checked_at).toLocaleString()}</span>
+                            ${h.error_message ? `<span class="error">${h.error_message}</span>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else {
+            content.innerHTML = '<div class="error">Failed to load statistics</div>';
+        }
+    } catch (error) {
+        content.innerHTML = '<div class="error">Error loading statistics</div>';
+    }
+}
+
+// Modal close functionality
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('close-modal') || e.target.classList.contains('modal')) {
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.style.display = 'none';
         });
     }
+});
 
-    // Close modal when X is clicked
-    document.querySelector('.close-modal').addEventListener('click', function() {
-        document.getElementById('add-site-modal').style.display = 'none';
+// Add first site button
+const addFirstBtn = document.getElementById('add-first-site-btn');
+if (addFirstBtn) {
+    addFirstBtn.addEventListener('click', function() {
+        document.querySelector('#monitor-url').focus();
     });
-
-    // Function to handle monitor form submission
-    async function handleMonitorSubmit(e) {
-        e.preventDefault();
-        
-        // Get URL from the form that triggered the event
-        const form = e.target;
-        const urlInput = form.querySelector('input[name="url"]');
-        const url = urlInput.value.trim();
-        
-        try {
-            const response = await fetch('/api/monitors', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ url })
-            });
-            
-            const data = await response.json();
-            
-            // Show notification
-            const notification = document.getElementById('notification');
-            notification.textContent = data.message;
-            notification.className = 'notification ' + (data.success ? 'success' : 'error');
-            notification.style.display = 'block';
-            
-            // Hide notification after 3 seconds
-            setTimeout(() => {
-                notification.style.display = 'none';
-            }, 3000);
-            
-            if (data.success) {
-                // Reset form
-                urlInput.value = '';
-                
-                // Close modal if it's the modal form
-                if (form.id === 'add-site-form') {
-                    document.getElementById('add-site-modal').style.display = 'none';
-                }
-                
-                // Reload page to show new monitor
-                window.location.reload();
-            }
-        } catch (error) {
-            console.error('Error adding monitor:', error);
-            const notification = document.getElementById('notification');
-            notification.textContent = 'An error occurred while adding the monitor';
-            notification.className = 'notification error';
-            notification.style.display = 'block';
-        }
-    }
-
-    // Handle modal form submission
-    document.getElementById('add-site-form').addEventListener('submit', handleMonitorSubmit);
-    
-    // Handle always-visible form submission
-    document.getElementById('add-monitor-form').addEventListener('submit', handleMonitorSubmit);
-
-
-    document.addEventListener('change', function(e) {
-        if (e.target.dataset.testid === 'email-notifications-toggle') {
-            const monitorId = e.target.dataset.monitorId;
-            const enabled = e.target.checked;
-
-            // Kontrolli, kas monitori ID on olemas
-            if (!monitorId) {
-                console.error('Monitor ID is missing');
-                return;
-            }
-
-            fetch(`/api/monitors/${monitorId}/notifications`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email_notifications: enabled })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                console.log('Email notification settings updated:', data);
-            })
-            .catch(error => {
-                console.error('Error updating email notifications:', error);
-                // Tagasi lülita checkbox, kui päring ebaõnnestus
-                e.target.checked = !enabled;
-            });
-        }
-    });
+}
 </script>

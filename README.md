@@ -7,7 +7,8 @@ Uptime Monitor is a web application that allows users to monitor the availabilit
 ## Technologies
 
 - **Runtime**: Bun
-- **Frontend**: React
+- **Frontend**: Express-Handlebars
+- **Backend**: Express.js
 - **Database**: SQLite
 - **Testing**: Playwright
 
@@ -17,12 +18,29 @@ Uptime Monitor is a web application that allows users to monitor the availabilit
 
 - [Bun](https://bun.sh/) (v1.0.0 or higher)
 
+### Environment Setup
+
+Copy the `.env.example` file to `.env` and update the values as needed:
+
+```bash
+cp .env.example .env
+```
+
+At minimum, you should configure:
+- `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` for email notifications
+- `JWT_SECRET` for secure authentication (can be any random string)
+
 ### Running the Application
 
 ```bash
+# Install dependencies
+bun install
 
-# Start the server
+# Start the development server
 bun run dev
+
+# OR for production
+bun run start
 ```
 
 The application will be available at http://localhost:3000.
@@ -104,7 +122,7 @@ Acceptance Criteria:
 * The status is updated in real-time
 
 
-Story 4: [ ] Email Notifications
+Story 4: [x] Email Notifications
 As a user, I want to receive email notifications when my monitored sites go down so that I can take immediate action.
 Acceptance Criteria:
 * I can enable email notifications for each of my monitors
