@@ -198,7 +198,8 @@ app.get('/dashboard', requireAuth, async (req, res) => {
             SELECT 
                 m.*,
                 (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.checked_at > datetime('now', '-24 hours')) as checks_today,
-                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.status = 'up' AND h.checked_at > datetime('now', '-24 hours')) as up_checks_today
+                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.status = 'up' AND h.checked_at > datetime('now', '-24 hours')) as up_checks_today,
+                datetime(m.last_checked, 'localtime') as last_checked_local
             FROM monitors m 
             WHERE m.user_id = ? 
             ORDER BY m.created_at DESC
@@ -210,6 +211,11 @@ app.get('/dashboard', requireAuth, async (req, res) => {
                 monitor.uptime_percentage = ((monitor.up_checks_today / monitor.checks_today) * 100).toFixed(1);
             } else {
                 monitor.uptime_percentage = 0;
+            }
+            
+            // Use the local time version instead of UTC
+            if (monitor.last_checked_local) {
+                monitor.last_checked = monitor.last_checked_local;
             }
         });
 
@@ -402,19 +408,24 @@ app.get('/api/monitors/:id/stats', requireAuth, async (req, res) => {
 
         // Verify the monitor belongs to the user
         const monitor = await db.get(
-            'SELECT * FROM monitors WHERE id = ? AND user_id = ?',
+            'SELECT *, datetime(last_checked, "localtime") as last_checked_local FROM monitors WHERE id = ? AND user_id = ?',
             [id, req.user.userId]
         );
 
         if (!monitor) {
             return res.status(404).json({ success: false, message: 'Monitor not found' });
         }
+        
+        // Use local time instead of UTC
+        if (monitor.last_checked_local) {
+            monitor.last_checked = monitor.last_checked_local;
+        }
 
         const stats = await monitorService.getMonitorStats(id, parseInt(hours));
         
-        // Get recent status history
+        // Get recent status history with local time
         const history = await db.all(`
-            SELECT status, response_time, checked_at, error_message
+            SELECT status, response_time, datetime(checked_at, 'localtime') as checked_at, error_message
             FROM monitor_status_history 
             WHERE monitor_id = ? 
             AND checked_at > datetime('now', '-${parseInt(hours)} hours')
@@ -468,7 +479,8 @@ app.get('/api/monitors', requireAuth, async (req, res) => {
             SELECT 
                 m.*,
                 (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.checked_at > datetime('now', '-24 hours')) as checks_today,
-                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.status = 'up' AND h.checked_at > datetime('now', '-24 hours')) as up_checks_today
+                (SELECT COUNT(*) FROM monitor_status_history h WHERE h.monitor_id = m.id AND h.status = 'up' AND h.checked_at > datetime('now', '-24 hours')) as up_checks_today,
+                datetime(m.last_checked, 'localtime') as last_checked_local
             FROM monitors m 
             WHERE m.user_id = ? 
             ORDER BY m.created_at DESC
@@ -480,6 +492,11 @@ app.get('/api/monitors', requireAuth, async (req, res) => {
                 monitor.uptime_percentage = ((monitor.up_checks_today / monitor.checks_today) * 100).toFixed(1);
             } else {
                 monitor.uptime_percentage = 0;
+            }
+            
+            // Use the local time version instead of UTC
+            if (monitor.last_checked_local) {
+                monitor.last_checked = monitor.last_checked_local;
             }
         });
 
