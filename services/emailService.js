@@ -74,7 +74,6 @@ Site: ${monitorName || 'Monitor'}
 URL: ${monitorUrl}
 Status: UP
 Time: ${new Date().toLocaleString()}
-${downDuration ? `Downtime: ${downDuration}` : ''}
 
 Your site is now responding normally.
 
@@ -92,7 +91,6 @@ Uptime Monitor Team
         <p><strong>URL:</strong> <a href="${monitorUrl}" style="color: #1976d2;">${monitorUrl}</a></p>
         <p><strong>Status:</strong> <span style="color: #2e7d32; font-weight: bold;">UP</span></p>
         <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-        ${downDuration ? `<p><strong>Downtime:</strong> ${downDuration}</p>` : ''}
     </div>
     
     <p>Your site is now responding normally.</p>
